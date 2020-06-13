@@ -1,6 +1,8 @@
 package todos
 
-import "time"
+import (
+	"time"
+)
 
 // Todo is the primary data structure for interacting with the application. Note that
 // while a Todo must be assigned to a User, the data must be manually updated with the

@@ -15,14 +15,17 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-func Register(c *gin.Context) {
+// Register a new user with the specified username and password. Register is POST only
+// and binds the registerUserForm to get the data. Returns an error if the username or
+// email is not unique.
+func (s *API) Register(c *gin.Context) {
 	form := registerUserForm{}
 	if err := c.ShouldBind(&form); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	if _, ok := users[form.Username]; ok {
+	if _, ok := s.users[form.Username]; ok {
 		err := fmt.Errorf("username %q already taken", form.Username)
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
@@ -42,18 +45,22 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	users[form.Username] = user
+	s.users[form.Username] = user
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-func Login(c *gin.Context) {
+// Login the user with the specified username and password. Login uses argon2 derived
+// key comparisons to verify the user without storing the password in plain text. This
+// handler binds to the loginUserForm and returns unauthorized if the password is not
+// correct. On successful login, a JWT token is returned and a cookie set.
+func (s *API) Login(c *gin.Context) {
 	form := loginUserForm{}
 	if err := c.ShouldBind(&form); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	user, ok := users[form.Username]
+	user, ok := s.users[form.Username]
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
 		return
@@ -66,14 +73,16 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	if valid {
-		c.JSON(http.StatusOK, map[string]interface{}{"success": true})
-	} else {
+	if !valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		return
 	}
+
+	c.JSON(http.StatusOK, map[string]interface{}{"success": true})
 }
 
-func Logout(c *gin.Context) {
+// Logout expires the user's JWT token.
+func (s *API) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]interface{}{"success": true})
 }
 

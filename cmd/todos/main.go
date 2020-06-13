@@ -37,7 +37,12 @@ func main() {
 //===========================================================================
 
 func serve(c *cli.Context) (err error) {
-	if err = todos.Serve(); err != nil {
+	var api *todos.API
+	if api, err = todos.New(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	if err = api.Serve(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 	return nil

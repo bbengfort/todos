@@ -11,6 +11,8 @@ func TestPasswordDerivedKey(t *testing.T) {
 	pw, err := CreateDerivedKey("supersecretpassword")
 	require.NoError(t, err)
 
+	t.Log(pw)
+
 	dk, salt, tm, mem, proc, err := ParseDerivedKey(pw)
 	require.NoError(t, err)
 	require.Len(t, dk, 32)
