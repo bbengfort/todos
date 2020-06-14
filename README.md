@@ -29,5 +29,17 @@ This standard format stores information needed to compute a per-user derived key
 
 ### JWT
 
-Once the user logs in, they will be granted a JWT token.
+Once the user logs in, they will be granted a JWT access token and JWT refresh token. I've done a lot of reading about API authorization schemes and honestly there is a lot of stuff out there. Frankly I'd prefer something like [HAWK](https://chrisdecairos.ca/api-key-authentication-using-hawk/) to JWT, but it seems like this scheme hasn't been updated since 2015. The way I intend to use JWT is similar to the database access/refresh method described [here](https://www.cloudjourney.io/articles/security/jwt_in_golang-su/) and [here](https://www.sohamkamani.com/golang/2019-01-01-jwt-authentication/), though with Postgres instead of Redis as a backend (this is basically a single user app).
+
+So here's the scheme:
+
+1. **Login**: grant an access token with a 4 hour expiration and a refresh token with a 12 hour expiration. These tokens are saved in the database with claims information. The login can optionally set a cookie.
+2. **Authorization**: check the Bearer header, cookie, and token request parameters for the access token, verify the key still exists in the database and that it hasn't expired. Load user information into the context of the request or return unauthorized/anonymous.
+3. **Logout**: fetch the access token in the same manner as Authorization, but then delete the token from the database, revoking access. The logout request can optionally take a "revoke all" parameter, which revokes all tokens for the user.
+4. **Refresh**: the refresh token cannot be used for authorization, but it does have a longer expiration than the access token, which means that it can be used to periodically refresh the access token with clients (particularly the CLI clients).
+
+Other features/notes:
+
+- a new token is generated on every login, so the user can have different tokens on multiple devices.
+- a side go routine needs to run periodically to clean up expired tokens or an automatic mechanism needs to delete the token from the database when it's expired.
 

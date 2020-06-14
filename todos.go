@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
 )
 
@@ -28,7 +29,8 @@ type API struct {
 	done    chan bool    // synchronize shutdown gracefully
 
 	// Temporary
-	users map[string]User
+	users  map[string]User
+	tokens map[uuid.UUID]Token
 }
 
 // New creates a Todos API server with the specified options, ready for running.
@@ -38,8 +40,9 @@ func New() (api *API, err error) {
 		done:    make(chan bool),
 	}
 
-	// Temporary
+	// Temporary data store
 	api.users = make(map[string]User)
+	api.tokens = make(map[uuid.UUID]Token)
 
 	// Create the router
 	api.router = gin.Default()

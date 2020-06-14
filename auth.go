@@ -9,28 +9,38 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
 )
+
+//===========================================================================
+// Handlers
+//===========================================================================
 
 // Register a new user with the specified username and password. Register is POST only
 // and binds the registerUserForm to get the data. Returns an error if the username or
 // email is not unique.
 func (s *API) Register(c *gin.Context) {
+	// Bind and parse the POST data
 	form := registerUserForm{}
 	if err := c.ShouldBind(&form); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
+	// Check uniqueness constraints (maybe not necessary with database)
 	if _, ok := s.users[form.Username]; ok {
 		err := fmt.Errorf("username %q already taken", form.Username)
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
+	// Create the user with a derived key password
 	user := User{
 		Username:  form.Username,
 		Email:     form.Email,
@@ -45,6 +55,7 @@ func (s *API) Register(c *gin.Context) {
 		return
 	}
 
+	// Insert the user into the database
 	s.users[form.Username] = user
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
@@ -54,18 +65,23 @@ func (s *API) Register(c *gin.Context) {
 // handler binds to the loginUserForm and returns unauthorized if the password is not
 // correct. On successful login, a JWT token is returned and a cookie set.
 func (s *API) Login(c *gin.Context) {
+	// TODO: check if already logged in and return bad request if so (must logout or use refresh)
+
+	// Bind and parse the POST data
 	form := loginUserForm{}
 	if err := c.ShouldBind(&form); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
+	// Lookup the user in the database
 	user, ok := s.users[form.Username]
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
 		return
 	}
 
+	// Verify the password
 	valid, err := VerifyDerivedKey(user.Password, form.Password)
 	if err != nil {
 		// Panic instead?
@@ -73,18 +89,85 @@ func (s *API) Login(c *gin.Context) {
 		return
 	}
 
+	// If password does not match, deny access
 	if !valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
 		return
 	}
 
-	c.JSON(http.StatusOK, map[string]interface{}{"success": true})
+	// Issue new JWT tokens for the user
+	token, err := CreateAuthToken(user.ID)
+	if err != nil {
+		// Panic instead?
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+	}
+
+	// Save the token to the database
+	s.tokens[token.ID] = token
+
+	if !form.NoCookie {
+		// Store the tokens as cookies
+		// TODO: get the domains from a configuration
+		c.SetCookie(jwtAccessCookieName, token.accessToken, int(jwtAccessTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
+		c.SetCookie(jwtRefreshCookieName, token.refreshToken, int(jwtRefreshTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
+	}
+
+	// Return the tokens for use by the api as Bearer headers
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"access_token":  token.accessToken,
+		"refresh_token": token.refreshToken,
+	})
 }
 
-// Logout expires the user's JWT token.
+// Logout expires the user's JWT token. Note that Logout does not have the authorization
+// middleware so lookups up the access token in the same manner as that middleware. If
+// no access token is provided, then a bad request is returned. Revoke all will delete
+// all tokens for the user with the provided access token.
 func (s *API) Logout(c *gin.Context) {
-	c.JSON(http.StatusOK, map[string]interface{}{"success": true})
+	tokenString, err := FindToken(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	tokenID, err := VerifyAuthToken(tokenString, true, false)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		return
+	}
+
+	token, ok := s.tokens[tokenID]
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		return
+	}
+
+	// Bind and parse the POST data
+	form := logoutUserForm{}
+	if err := c.ShouldBind(&form); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	if form.RevokeAll {
+		// TODO: issue the database query to do this
+		for id, other := range s.tokens {
+			if other.UserID == token.UserID {
+				delete(s.tokens, id)
+			}
+		}
+	} else {
+		// Delete just the single token
+		delete(s.tokens, tokenID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+//===========================================================================
+// User Methods
+//===========================================================================
 
 // SetPassword uses the Argon2 derived key algorithm to store the user password along
 // with a user-specific random salt into the database. Argon2 is a modern ASIC- and
@@ -93,6 +176,7 @@ func (s *API) Logout(c *gin.Context) {
 // database in a common format to ensure cross process compatibility. Each component is
 // separated by a $ and hashes are base64 encoded.
 func (u User) SetPassword(password string) (_ string, err error) {
+	// TODO: store in the database
 	return CreateDerivedKey(password)
 }
 
@@ -100,11 +184,16 @@ func (u User) SetPassword(password string) (_ string, err error) {
 // submitted password. This function uses the parameters from the stored password to
 // compute the dervied key and compare it.
 func (u User) VerifyPassword(password string) (_ bool, err error) {
+	// TODO: fetch password from the database
 	if u.Password == "" {
 		return false, errors.New("user does not have a password set")
 	}
 	return VerifyDerivedKey(u.Password, password)
 }
+
+//===========================================================================
+// Derived Key Algorithm
+//===========================================================================
 
 // Argon2 constants for the derived key (dk) algorithm
 // See: https://cryptobook.nakov.com/mac-and-key-derivation/argon2
@@ -201,4 +290,167 @@ func ParseDerivedKey(encoded string) (dk, salt []byte, time, memory uint32, thre
 	}
 
 	return dk, salt, time, memory, threads, nil
+}
+
+//===========================================================================
+// JWT Tokens
+//===========================================================================
+
+// JWT constants for access and refresh tokens
+// See: https://www.cloudjourney.io/articles/security/jwt_in_golang-su/
+const (
+	jwtAccessTokenDuration  = 4 * time.Hour
+	jwtRefreshTokenDuration = 12 * time.Hour
+	jwtAccessTokenAudience  = "access"
+	jwtRefreshTokenAudience = "refresh"
+	jwtAccessRefreshOverlap = -1 * time.Minute
+	jwtAccessCookieName     = "access_token"
+	jwtRefreshCookieName    = "refresh_token"
+)
+
+// JWT variables for access and refresh tokens
+var (
+	jwtKey           = []byte("supersecretkey") // TODO: fetch from the environment
+	jwtSigningMethod = jwt.SigningMethodHS256   // Declared here for consistency
+	jwtKeyFunc       = func(token *jwt.Token) (interface{}, error) {
+		// TODO: should we have separate keys for access and refresh tokens?
+		return jwtKey, nil
+	}
+)
+
+// AccessClaims returns the jwt.StandardClaims for the access token.
+func (t Token) AccessClaims() jwt.Claims {
+	return &jwt.StandardClaims{
+		Id:        t.ID.String(),
+		Audience:  jwtAccessTokenAudience,
+		IssuedAt:  t.IssuedAt.Unix(),
+		ExpiresAt: t.ExpiresAt.Unix(),
+	}
+}
+
+// AccessToken returns the cached access token or generates it from the claims.
+func (t Token) AccessToken() (token string, err error) {
+	// Return the cached access token if available
+	if t.accessToken != "" {
+		return t.accessToken, nil
+	}
+
+	// Generate the access token (but does not cache)
+	at := jwt.NewWithClaims(jwtSigningMethod, t.AccessClaims())
+	if token, err = at.SignedString(jwtKey); err != nil {
+		return "", fmt.Errorf("could not generate access token: %s", err)
+	}
+	return token, nil
+}
+
+// RefreshClaims returns the jwt.StandardClaims for the refresh token. Note that a
+// refresh token cannot be used until one minute within the access token expiration.
+func (t Token) RefreshClaims() jwt.Claims {
+	return &jwt.StandardClaims{
+		Id:        t.ID.String(),
+		Audience:  jwtRefreshTokenAudience,
+		IssuedAt:  t.IssuedAt.Unix(),
+		ExpiresAt: t.RefreshBy.Unix(),
+		NotBefore: t.ExpiresAt.Add(jwtAccessRefreshOverlap).Unix(),
+	}
+}
+
+// RefreshToken returns the cached refresh token or generates it from the claims.
+func (t Token) RefreshToken() (token string, err error) {
+	// Return the cached refresh token if available
+	if t.refreshToken != "" {
+		return t.refreshToken, nil
+	}
+
+	// Generate the access token (but does not cache)
+	rt := jwt.NewWithClaims(jwtSigningMethod, t.RefreshClaims())
+	if token, err = rt.SignedString(jwtKey); err != nil {
+		return "", fmt.Errorf("could not generate refresh token: %s", err)
+	}
+	return token, nil
+}
+
+// CreateAuthToken generates acccess and refresh tokens for API authorization using a
+// cookie or Bearer header and stores them in the database. A single user can create
+// multiple auth tokens and each of them are assigned a unique uuid for lookup.
+func CreateAuthToken(user uint) (token Token, err error) {
+	// Create the token record in the database
+	now := time.Now()
+	token = Token{
+		ID:        uuid.New(),
+		UserID:    user,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(jwtAccessTokenDuration),
+		RefreshBy: now.Add(jwtRefreshTokenDuration),
+	}
+
+	// Sign and generate the accessToken (caching it and ensuring no errors)
+	if token.accessToken, err = token.AccessToken(); err != nil {
+		return Token{}, err
+	}
+
+	// Sign and generate the refreshToken
+	if token.refreshToken, err = token.RefreshToken(); err != nil {
+		return Token{}, err
+	}
+
+	return token, nil
+}
+
+// VerifyAuthToken validates an access or refresh token string with its signature and claims
+// fields and verifies the token is an access or refresh token if required by the input.
+// If the token is valid, the database token id is returned without error, otherwise an
+// error is returned to indicate that the token is no longer valid.
+func VerifyAuthToken(tokenString string, access, refresh bool) (id uuid.UUID, err error) {
+	var token *jwt.Token
+	claims := &jwt.StandardClaims{}
+	if token, err = jwt.ParseWithClaims(tokenString, claims, jwtKeyFunc); err != nil {
+		return uuid.Nil, err
+	}
+
+	if !token.Valid {
+		// It is likely that we will never reach this line of code
+		return uuid.Nil, errors.New("token is invalid or has expired")
+	}
+
+	if access && !claims.VerifyAudience(jwtAccessTokenAudience, true) {
+		return uuid.Nil, errors.New("token is not an access token")
+	}
+
+	if refresh && !claims.VerifyAudience(jwtRefreshTokenAudience, true) {
+		return uuid.Nil, errors.New("token is not a refresh token")
+	}
+
+	if id, err = uuid.Parse(claims.Id); err != nil {
+		return uuid.Nil, fmt.Errorf("could not parse token id: %s", err)
+	}
+
+	return id, nil
+}
+
+// FindToken uses the gin context to look up the access token in the Bearer header, in
+// the cookies of the request, or as a url request parameter. It returns an error if it
+// cannot find the token string.
+func FindToken(c *gin.Context) (token string, err error) {
+	// Check the Bearer header for the token (usual place)
+	bearer := c.GetHeader("Authorization")
+	if bearer != "" {
+		parts := strings.Split(bearer, "Bearer ")
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1]), nil
+		}
+		return "", errors.New("could not parse Bearer authorization header")
+	}
+
+	// Check the cookie for the token
+	if cookie, err := c.Cookie(jwtAccessCookieName); err == nil {
+		return cookie, nil
+	}
+
+	// Check the request parameters for the token
+	if param := c.Request.URL.Query().Get("token"); param != "" {
+		return param, nil
+	}
+
+	return "", errors.New("no access token found in header, cookie, or request")
 }

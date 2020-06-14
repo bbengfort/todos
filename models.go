@@ -2,6 +2,8 @@ package todos
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Todo is the primary data structure for interacting with the application. Note that
@@ -57,4 +59,17 @@ type User struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 	Todos     []Todo     `json:"-"`
 	Lists     []List     `json:"-"`
+	Tokens    []Token    `json:"-"`
+}
+
+// Token holds an access and refresh tokens.
+type Token struct {
+	ID           uuid.UUID `gorm:"type:uuid;primary_key" json:"id"`
+	UserID       uint      `gorm:"not null" json:"user_id"`
+	User         User      `json:"-"`
+	IssuedAt     time.Time `json:"issued_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	RefreshBy    time.Time `json:"refresh_by"`
+	accessToken  string
+	refreshToken string
 }

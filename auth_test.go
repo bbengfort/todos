@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	. "github.com/bbengfort/todos"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,4 +30,26 @@ func TestPasswordDerivedKey(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid)
 
+}
+
+func TestAuthTokens(t *testing.T) {
+	token, err := CreateAuthToken(42)
+	require.NoError(t, err)
+	require.NotZero(t, token, "no token struct was returned")
+
+	at, err := token.AccessToken()
+	require.NoError(t, err)
+
+	rt, err := token.RefreshToken()
+	require.NoError(t, err)
+	require.NotEqual(t, at, rt, "access and refresh tokens are identical")
+
+	aid, err := VerifyAuthToken(at, true, false)
+	require.NoError(t, err)
+	require.Equal(t, token.ID, aid)
+
+	// The refresh token will not be valid until the future
+	rid, err := VerifyAuthToken(rt, false, true)
+	require.Error(t, err)
+	require.Equal(t, uuid.Nil, rid)
 }
