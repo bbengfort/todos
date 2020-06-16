@@ -29,7 +29,7 @@ type API struct {
 	done    chan bool    // synchronize shutdown gracefully
 
 	// Temporary
-	users  map[string]User
+	users  map[uint]User
 	tokens map[uuid.UUID]Token
 }
 
@@ -41,7 +41,7 @@ func New() (api *API, err error) {
 	}
 
 	// Temporary data store
-	api.users = make(map[string]User)
+	api.users = make(map[uint]User)
 	api.tokens = make(map[uuid.UUID]Token)
 
 	// Create the router
@@ -107,6 +107,10 @@ func (s *API) setupRoutes() (err error) {
 	s.router.POST("/login", s.Login)
 	s.router.POST("/logout", s.Logout)
 	s.router.POST("/register", s.Register)
+	s.router.POST("/refresh", s.Refresh)
+
+	// Application routes
+	s.router.GET("/", s.Authorize(), s.Overview)
 
 	return nil
 }

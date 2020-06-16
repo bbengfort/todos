@@ -22,6 +22,9 @@ import (
 // Handlers
 //===========================================================================
 
+// TODO: remove
+var useridsequence uint
+
 // Register a new user with the specified username and password. Register is POST only
 // and binds the registerUserForm to get the data. Returns an error if the username or
 // email is not unique.
@@ -34,14 +37,16 @@ func (s *API) Register(c *gin.Context) {
 	}
 
 	// Check uniqueness constraints (maybe not necessary with database)
-	if _, ok := s.users[form.Username]; ok {
-		err := fmt.Errorf("username %q already taken", form.Username)
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
-		return
-	}
+	// if _, ok := s.users[form.Username]; ok {
+	// 	err := fmt.Errorf("username %q already taken", form.Username)
+	// 	c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+	// 	return
+	// }
 
 	// Create the user with a derived key password
+	useridsequence++
 	user := User{
+		ID:        useridsequence,
 		Username:  form.Username,
 		Email:     form.Email,
 		CreatedAt: time.Now(),
@@ -56,7 +61,7 @@ func (s *API) Register(c *gin.Context) {
 	}
 
 	// Insert the user into the database
-	s.users[form.Username] = user
+	s.users[user.ID] = user
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -75,7 +80,15 @@ func (s *API) Login(c *gin.Context) {
 	}
 
 	// Lookup the user in the database
-	user, ok := s.users[form.Username]
+	var ok bool
+	var user User
+	for _, u := range s.users {
+		if u.Username == form.Username {
+			user = u
+			ok = true
+			break
+		}
+	}
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
 		return
@@ -137,6 +150,7 @@ func (s *API) Logout(c *gin.Context) {
 		return
 	}
 
+	// TODO: use the database to look up the token
 	token, ok := s.tokens[tokenID]
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
@@ -165,6 +179,103 @@ func (s *API) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+// Refresh the access token with the refresh token if it's available and valid. The
+// refresh token is essentially a time-limited one time key that will allow the user to
+// reauthenticate without a username and password. If the user logs out, the refresh
+// token will be revoked and no longer usable. Note that the server does not do any
+// verification of the refresh token so it should be kept secret by the client in the
+// same way a username and password should be kept secret. However, because the refresh
+// token can be revoked and automatically expires, it is a slightly safer mechanism of
+// reauthentication than resending a username and password combination.
+func (s *API) Refresh(c *gin.Context) {
+	// Bind and parse the POST data
+	form := refreshTokenForm{}
+	if err := c.ShouldBind(&form); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	tokenID, err := VerifyAuthToken(form.RefreshToken, false, true)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		return
+	}
+
+	// TODO: use the database to look up the old token
+	refresh, ok := s.tokens[tokenID]
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		return
+	}
+
+	// Issue new JWT tokens for the user
+	token, err := CreateAuthToken(refresh.UserID)
+	if err != nil {
+		// Panic instead?
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+	}
+
+	// Save the token to the database
+	s.tokens[token.ID] = token
+
+	if !form.NoCookie {
+		// Store the tokens as cookies
+		// TODO: get the domains from a configuration
+		c.SetCookie(jwtAccessCookieName, token.accessToken, int(jwtAccessTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
+		c.SetCookie(jwtRefreshCookieName, token.refreshToken, int(jwtRefreshTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
+	}
+
+	// Revoke the old tokens
+	delete(s.tokens, tokenID)
+
+	// Return the tokens for use by the api as Bearer headers
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"access_token":  token.accessToken,
+		"refresh_token": token.refreshToken,
+	})
+}
+
+//===========================================================================
+// Middleware
+//===========================================================================
+
+// Authorize is middleware that checks for an access token in the request and only
+// allows processing to proceed if the user is valid and authorized. The middleware also
+// loads the user information into the context so that it is available to downstream
+// handlers.
+func (s *API) Authorize() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenString, err := FindToken(c)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.Abort()
+			return
+		}
+
+		tokenID, err := VerifyAuthToken(tokenString, true, false)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.Abort()
+			return
+		}
+
+		// TODO: use the database to look up the token (and also fetch user related struct, for only single query)
+		token, ok := s.tokens[tokenID]
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.Abort()
+			return
+		}
+
+		// TODO: use the database query from before to add the user
+		c.Set(ctxUserKey, s.users[token.UserID])
+
+		// Everything checks out, user is good to go
+		c.Next()
+	}
+}
+
 //===========================================================================
 // User Methods
 //===========================================================================
@@ -176,7 +287,7 @@ func (s *API) Logout(c *gin.Context) {
 // database in a common format to ensure cross process compatibility. Each component is
 // separated by a $ and hashes are base64 encoded.
 func (u User) SetPassword(password string) (_ string, err error) {
-	// TODO: store in the database
+	// TODO: store in the database directly without modifying user struct
 	return CreateDerivedKey(password)
 }
 
@@ -184,7 +295,7 @@ func (u User) SetPassword(password string) (_ string, err error) {
 // submitted password. This function uses the parameters from the stored password to
 // compute the dervied key and compare it.
 func (u User) VerifyPassword(password string) (_ bool, err error) {
-	// TODO: fetch password from the database
+	// TODO: fetch password from the database (does not use user struct)
 	if u.Password == "" {
 		return false, errors.New("user does not have a password set")
 	}
@@ -299,11 +410,14 @@ func ParseDerivedKey(encoded string) (dk, salt []byte, time, memory uint32, thre
 // JWT constants for access and refresh tokens
 // See: https://www.cloudjourney.io/articles/security/jwt_in_golang-su/
 const (
-	jwtAccessTokenDuration  = 4 * time.Hour
-	jwtRefreshTokenDuration = 12 * time.Hour
+	// jwtAccessTokenDuration  = 4 * time.Hour
+	// jwtRefreshTokenDuration = 12 * time.Hour
+	// jwtAccessRefreshOverlap = -1 * time.Minute
+	jwtAccessTokenDuration  = 2 * time.Minute
+	jwtRefreshTokenDuration = 12 * time.Minute
+	jwtAccessRefreshOverlap = -1 * time.Minute
 	jwtAccessTokenAudience  = "access"
 	jwtRefreshTokenAudience = "refresh"
-	jwtAccessRefreshOverlap = -1 * time.Minute
 	jwtAccessCookieName     = "access_token"
 	jwtRefreshCookieName    = "refresh_token"
 )

@@ -49,7 +49,20 @@ func TestAuthTokens(t *testing.T) {
 	require.Equal(t, token.ID, aid)
 
 	// The refresh token will not be valid until the future
+	// TODO: allow refresh times to be set by tests for verification
 	rid, err := VerifyAuthToken(rt, false, true)
 	require.Error(t, err)
 	require.Equal(t, uuid.Nil, rid)
+}
+
+func TestAuth(t *testing.T) {
+	// TODO: Register a user
+	// TODO: Attempt login with bad password
+	// TODO: Login with good password
+	// TODO: Verify auth token gives access
+	// TODO: Test refresh mechanism
+	// TODO: Test logout
+	// TODO: Test logout revokes refresh
+	// TODO: Test multiple login
+	// TODO: Test logout revoke all
 }
