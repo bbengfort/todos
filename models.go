@@ -41,13 +41,13 @@ type List struct {
 	UserEmail string     `gorm:"-" json:"user"`
 	Title     string     `gorm:"not null;size:255" json:"title"`
 	Details   string     `gorm:"not null;size:4095" json:"details"`
-	Completed uint       `gorm:"-" json:"completed"`
-	Archived  uint       `gorm:"-" json:"archived"`
+	Completed uint       `gorm:"-" json:"completed,omitempty"`
+	Archived  uint       `gorm:"-" json:"archived,omitempty"`
 	Size      uint       `gorm:"-" json:"size"`
 	Deadline  *time.Time `json:"deadline,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
-	Todos     []Todo     `json:"todos"`
+	Todos     []Todo     `json:"todos,omitempty"`
 }
 
 // User is primarily used for authentication and storing json web tokens.

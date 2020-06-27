@@ -1,7 +1,5 @@
 package todos
 
-import "time"
-
 // POST to /register to create a new user
 type registerUserForm struct {
 	Username string `json:"username" xml:"username" binding:"required"`
@@ -26,14 +24,4 @@ type logoutUserForm struct {
 type refreshTokenForm struct {
 	RefreshToken string `json:"refresh_token" xml:"refresh_token" binding:"required"`
 	NoCookie     bool   `json:"no_cookie" xml:"no_cookie"`
-}
-
-// PUT to /todos/:id to update a todo
-type updateTodo struct {
-	Title     string     `json:"title" xml:"title"`
-	Details   string     `json:"details" xml:"details"`
-	Completed bool       `json:"completed" xml:"completed"`
-	Archived  bool       `json:"archived" xml:"archived"`
-	ListID    *uint      `json:"list" xml:"list"`
-	Deadline  *time.Time `json:"deadline" xml:"deadline"`
 }
