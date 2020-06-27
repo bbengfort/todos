@@ -249,6 +249,8 @@ func (s *API) Refresh(c *gin.Context) {
 // allows processing to proceed if the user is valid and authorized. The middleware also
 // loads the user information into the context so that it is available to downstream
 // handlers.
+//
+// TODO: this requires several database queries per request, can we simplify it?
 func (s *API) Authorize() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := FindToken(c)
@@ -281,12 +283,15 @@ func (s *API) Authorize() gin.HandlerFunc {
 
 		// Populate the user related model in the token
 		// TODO: this should be done in the same query as above
+		// TODO: we should make sure that only id, username, and is_admin are populated (maybe also last seen)
 		if err = s.db.Model(&token).Related(&token.User).Error; err != nil {
 			logger.Printf("could not look up user for token: %s", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 			c.Abort()
 			return
 		}
+
+		// TODO: update last_seen in the database
 
 		// Save the user in the context for downstream usage
 		c.Set(ctxUserKey, token.User)

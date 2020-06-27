@@ -16,7 +16,7 @@ type Todo struct {
 	UserID    uint       `json:"-"`
 	User      User       `json:"-"`
 	UserEmail string     `gorm:"-" json:"user"`
-	Title     string     `gorm:"not null;size:255" json:"title"`
+	Title     string     `gorm:"not null;size:255" json:"title" binding:"required"`
 	Details   string     `gorm:"not null;size:4095" json:"details"`
 	Completed bool       `json:"completed"`
 	Archived  bool       `json:"archived"`

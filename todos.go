@@ -131,6 +131,23 @@ func (s *API) setupRoutes() (err error) {
 
 	// Application routes
 	s.router.GET("/", authorize, s.Overview)
+	todos := s.router.Group("/todos", authorize)
+	{
+		todos.GET("", s.FindTodos)
+		todos.POST("", s.CreateTodo)
+		todos.GET("/:id", s.DetailTodo)
+		todos.PUT("/:id", s.UpdateTodo)
+		todos.DELETE("/:id", s.DeleteTodo)
+	}
+
+	lists := s.router.Group("/lists", authorize)
+	{
+		lists.GET("", s.FindLists)
+		lists.POST("", s.CreateList)
+		lists.GET("/:id", s.DetailList)
+		lists.PUT("/:id", s.UpdateList)
+		lists.DELETE("/:id", s.DeleteList)
+	}
 
 	return nil
 }
