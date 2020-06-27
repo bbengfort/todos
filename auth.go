@@ -15,15 +15,13 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jinzhu/gorm"
 	"golang.org/x/crypto/argon2"
 )
 
 //===========================================================================
 // Handlers
 //===========================================================================
-
-// TODO: remove
-var useridsequence uint
 
 // Register a new user with the specified username and password. Register is POST only
 // and binds the registerUserForm to get the data. Returns an error if the username or
@@ -36,21 +34,11 @@ func (s *API) Register(c *gin.Context) {
 		return
 	}
 
-	// Check uniqueness constraints (maybe not necessary with database)
-	// if _, ok := s.users[form.Username]; ok {
-	// 	err := fmt.Errorf("username %q already taken", form.Username)
-	// 	c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
-	// 	return
-	// }
-
 	// Create the user with a derived key password
-	useridsequence++
 	user := User{
-		ID:        useridsequence,
-		Username:  form.Username,
-		Email:     form.Email,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Username: form.Username,
+		Email:    form.Email,
+		IsAdmin:  form.IsAdmin,
 	}
 
 	var err error
@@ -62,8 +50,13 @@ func (s *API) Register(c *gin.Context) {
 	}
 
 	// Insert the user into the database
-	s.users[user.ID] = user
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	if err = s.db.Create(&user).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Return successful result, user has been created
+	c.JSON(http.StatusCreated, gin.H{"success": true, "username": user.Username})
 }
 
 // Login the user with the specified username and password. Login uses argon2 derived
@@ -81,18 +74,16 @@ func (s *API) Login(c *gin.Context) {
 	}
 
 	// Lookup the user in the database
-	var ok bool
 	var user User
-	for _, u := range s.users {
-		if u.Username == form.Username {
-			user = u
-			ok = true
-			break
+	if err := s.db.Select("id, password").Where("username = ?", form.Username).First(&user).Error; err != nil {
+		if gorm.IsRecordNotFoundError(err) {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			return
 		}
-	}
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		logger.Printf("could not look up user: %s", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
+
 	}
 
 	// Verify the password
@@ -111,21 +102,18 @@ func (s *API) Login(c *gin.Context) {
 	}
 
 	// Issue new JWT tokens for the user
-	token, err := CreateAuthToken(user.ID)
+	token, err := CreateAuthToken(s.db, user.ID)
 	if err != nil {
 		// Panic instead?
 		logger.Printf("could not create auth token: %s", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		return
 	}
-
-	// Save the token to the database
-	s.tokens[token.ID] = token
 
 	if !form.NoCookie {
 		// Store the tokens as cookies
-		// TODO: get the domains from a configuration
-		c.SetCookie(jwtAccessCookieName, token.accessToken, int(jwtAccessTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
-		c.SetCookie(jwtRefreshCookieName, token.refreshToken, int(jwtRefreshTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
+		c.SetCookie(jwtAccessCookieName, token.accessToken, int(jwtAccessTokenDuration.Seconds()), "/", s.conf.Domain, false, true)
+		c.SetCookie(jwtRefreshCookieName, token.refreshToken, int(jwtRefreshTokenDuration.Seconds()), "/", s.conf.Domain, false, true)
 	}
 
 	// Return the tokens for use by the api as Bearer headers
@@ -153,10 +141,15 @@ func (s *API) Logout(c *gin.Context) {
 		return
 	}
 
-	// TODO: use the database to look up the token
-	token, ok := s.tokens[tokenID]
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+	// Look up the token in the database
+	token := Token{ID: tokenID}
+	if err = s.db.Where(&token).First(&token).Error; err != nil {
+		if gorm.IsRecordNotFoundError(err) {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			return
+		}
+		logger.Printf("could not look up token: %s", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
 	}
 
@@ -168,15 +161,18 @@ func (s *API) Logout(c *gin.Context) {
 	}
 
 	if form.RevokeAll {
-		// TODO: issue the database query to do this
-		for id, other := range s.tokens {
-			if other.UserID == token.UserID {
-				delete(s.tokens, id)
-			}
+		if err := s.db.Where("user_id = ?", token.UserID).Delete(Token{}).Error; err != nil {
+			logger.Printf("could not delete revoked tokens: %s", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			return
 		}
 	} else {
 		// Delete just the single token
-		delete(s.tokens, tokenID)
+		if err := s.db.Delete(&token).Error; err != nil {
+			logger.Printf("could not delete revoked token: %s", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -204,33 +200,38 @@ func (s *API) Refresh(c *gin.Context) {
 		return
 	}
 
-	// TODO: use the database to look up the old token
-	refresh, ok := s.tokens[tokenID]
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+	// Look up the token in the database
+	refresh := Token{ID: tokenID}
+	if err = s.db.Where(&refresh).First(&refresh).Error; err != nil {
+		if gorm.IsRecordNotFoundError(err) {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			return
+		}
+		logger.Printf("could not look up token: %s", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
 	}
 
 	// Issue new JWT tokens for the user
-	token, err := CreateAuthToken(refresh.UserID)
+	token, err := CreateAuthToken(s.db, refresh.UserID)
 	if err != nil {
 		// Panic instead?
 		logger.Printf("could not create auth token: %s", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 	}
 
-	// Save the token to the database
-	s.tokens[token.ID] = token
-
 	if !form.NoCookie {
 		// Store the tokens as cookies
-		// TODO: get the domains from a configuration
-		c.SetCookie(jwtAccessCookieName, token.accessToken, int(jwtAccessTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
-		c.SetCookie(jwtRefreshCookieName, token.refreshToken, int(jwtRefreshTokenDuration.Seconds()), "/", "todos.bengfort.com", false, true)
+		c.SetCookie(jwtAccessCookieName, token.accessToken, int(jwtAccessTokenDuration.Seconds()), "/", s.conf.Domain, false, true)
+		c.SetCookie(jwtRefreshCookieName, token.refreshToken, int(jwtRefreshTokenDuration.Seconds()), "/", s.conf.Domain, false, true)
 	}
 
 	// Revoke the old tokens
-	delete(s.tokens, tokenID)
+	if err := s.db.Delete(&refresh).Error; err != nil {
+		logger.Printf("could not delete revoked token: %s", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		return
+	}
 
 	// Return the tokens for use by the api as Bearer headers
 	c.JSON(http.StatusOK, gin.H{
@@ -264,16 +265,56 @@ func (s *API) Authorize() gin.HandlerFunc {
 			return
 		}
 
-		// TODO: use the database to look up the token (and also fetch user related struct, for only single query)
-		token, ok := s.tokens[tokenID]
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		// Look up the token in the database
+		token := Token{ID: tokenID}
+		if err = s.db.Where(&token).First(&token).Error; err != nil {
+			if gorm.IsRecordNotFoundError(err) {
+				c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+				c.Abort()
+				return
+			}
+			logger.Printf("could not look up token: %s", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 			c.Abort()
 			return
 		}
 
-		// TODO: use the database query from before to add the user
-		c.Set(ctxUserKey, s.users[token.UserID])
+		// Populate the user related model in the token
+		// TODO: this should be done in the same query as above
+		if err = s.db.Model(&token).Related(&token.User).Error; err != nil {
+			logger.Printf("could not look up user for token: %s", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.Abort()
+			return
+		}
+
+		// Save the user in the context for downstream usage
+		c.Set(ctxUserKey, token.User)
+
+		// Everything checks out, user is good to go
+		c.Next()
+	}
+}
+
+// Administrative is middleware that checks that the user is an admin user otherwise
+// returns not authorized. This middleware must follow the Authenticate middleware or
+// an internal error is returned.
+func (s *API) Administrative() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		val := c.Value(ctxUserKey)
+		if val == nil {
+			logger.Printf("no user stored on context, authenticate middleware must proceed administrative")
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.Abort()
+			return
+		}
+
+		user := val.(User)
+		if !user.IsAdmin {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.Abort()
+			return
+		}
 
 		// Everything checks out, user is good to go
 		c.Next()
@@ -488,7 +529,7 @@ func (t Token) RefreshToken() (token string, err error) {
 // CreateAuthToken generates acccess and refresh tokens for API authorization using a
 // cookie or Bearer header and stores them in the database. A single user can create
 // multiple auth tokens and each of them are assigned a unique uuid for lookup.
-func CreateAuthToken(user uint) (token Token, err error) {
+func CreateAuthToken(db *gorm.DB, user uint) (token Token, err error) {
 	// Create the token record in the database
 	now := time.Now()
 	token = Token{
@@ -506,6 +547,10 @@ func CreateAuthToken(user uint) (token Token, err error) {
 
 	// Sign and generate the refreshToken
 	if token.refreshToken, err = token.RefreshToken(); err != nil {
+		return Token{}, err
+	}
+
+	if err = db.Create(&token).Error; err != nil {
 		return Token{}, err
 	}
 

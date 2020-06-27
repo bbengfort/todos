@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
 
 	// Load database dialects for use with gorm
@@ -33,10 +32,6 @@ type API struct {
 	db      *gorm.DB     // connection to the database through GORM
 	healthy bool         // application state of the server
 	done    chan bool    // synchronize shutdown gracefully
-
-	// Temporary
-	users  map[uint]User
-	tokens map[uuid.UUID]Token
 }
 
 // New creates a Todos API server with the specified settings, fully initialized and
@@ -53,10 +48,6 @@ func New(conf Settings) (api *API, err error) {
 	if err = api.setupDatabase(); err != nil {
 		return nil, err
 	}
-
-	// Temporary data store
-	api.users = make(map[uint]User)
-	api.tokens = make(map[uuid.UUID]Token)
 
 	// Create the router
 	gin.SetMode(api.conf.Mode)
@@ -126,6 +117,8 @@ func (s *API) Shutdown() (err error) {
 func (s *API) setupRoutes() (err error) {
 	// Middleware
 	s.router.Use(s.Available())
+	authorize := s.Authorize()
+	administrative := s.Administrative()
 
 	// Heartbeat route
 	s.router.GET("/status", s.Status)
@@ -134,10 +127,10 @@ func (s *API) setupRoutes() (err error) {
 	s.router.POST("/login", s.Login)
 	s.router.POST("/logout", s.Logout)
 	s.router.POST("/refresh", s.Refresh)
-	s.router.POST("/register", s.Register) // TODO: make registration admin only
+	s.router.POST("/register", authorize, administrative, s.Register)
 
 	// Application routes
-	s.router.GET("/", s.Authorize(), s.Overview)
+	s.router.GET("/", authorize, s.Overview)
 
 	return nil
 }

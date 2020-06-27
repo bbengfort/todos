@@ -33,7 +33,7 @@ func TestPasswordDerivedKey(t *testing.T) {
 }
 
 func TestAuthTokens(t *testing.T) {
-	token, err := CreateAuthToken(42)
+	token, err := CreateAuthToken(nil, 42)
 	require.NoError(t, err)
 	require.NotZero(t, token, "no token struct was returned")
 
