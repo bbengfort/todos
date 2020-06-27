@@ -13,7 +13,28 @@ This development is meant to answer several questions which I will place in this
 
 ## Getting Started
 
-TODO: write this section.
+This application consists of two parts, an API server and a command line application. The server can be used to create rich applications such as web or electron apps and the CLI app can be used on a day-to-day basis or for debugging purposes. You can install both of these tools using:
+
+```
+$ go get github.com/bbengfort/todos/...
+```
+
+Or by cloning the repository and building locally:
+
+```
+$ go install ./...
+```
+
+This should add the `todos` command to your `$PATH`, use `todos --help` to see what commands and options are available.
+
+### Server
+
+The server is primarily configured through the environment (though some command line options can be specified using the `todos serve` command). There are several required configurations including:
+
+- `$SECRET_KEY`
+- `$DATABASE_URL`
+
+If you're running the server in production, you'll also likely want to set `$TODOS_MODE` to `"release"` (by default it is set to `"debug"` but you can also specify `"test"`). For more settings please see the `Settings` object. Once the environment is configured, simply run `todos serve`.
 
 ## Authentication
 
@@ -42,4 +63,3 @@ Other features/notes:
 
 - a new token is generated on every login, so the user can have different tokens on multiple devices.
 - a side go routine needs to run periodically to clean up expired tokens or an automatic mechanism needs to delete the token from the database when it's expired.
-

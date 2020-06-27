@@ -14,6 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
+
+	// Load database dialects for use with gorm
+	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
 // Version of the TODOs application
@@ -37,12 +40,18 @@ type API struct {
 }
 
 // New creates a Todos API server with the specified settings, fully initialized and
-// ready to be run, but without causing any connections to be established.
+// ready to be run. Note that this function will attempt to connect to the database and
+// migrate the latest schema to it.
 func New(conf Settings) (api *API, err error) {
 	api = &API{
 		conf:    conf,
 		healthy: false,
 		done:    make(chan bool),
+	}
+
+	// Connect to the database
+	if err = api.setupDatabase(); err != nil {
+		return nil, err
 	}
 
 	// Temporary data store
@@ -104,6 +113,12 @@ func (s *API) Shutdown() (err error) {
 		return fmt.Errorf("could not gracefully shutdown server: %s", err)
 	}
 
+	if s.db != nil {
+		if err = s.db.Close(); err != nil {
+			log.Printf("could not close connection to database: %s\n", err)
+		}
+	}
+
 	close(s.done)
 	return nil
 }
@@ -123,6 +138,20 @@ func (s *API) setupRoutes() (err error) {
 
 	// Application routes
 	s.router.GET("/", s.Authorize(), s.Overview)
+
+	return nil
+}
+
+func (s *API) setupDatabase() (err error) {
+	// TODO: support dialects other than postgres?
+	if s.db, err = gorm.Open("postgres", s.conf.DatabaseURL); err != nil {
+		return err
+	}
+
+	// Migrate the database to the latest schema
+	if err = Migrate(s.db); err != nil {
+		return err
+	}
 
 	return nil
 }

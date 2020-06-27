@@ -1,9 +1,11 @@
 package todos
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jinzhu/gorm"
 )
 
 // Todo is the primary data structure for interacting with the application. Note that
@@ -54,6 +56,7 @@ type User struct {
 	Username  string     `gorm:"unique;not null;size:255" json:"username"`
 	Email     string     `gorm:"unique;not null;size:255" json:"email"`
 	Password  string     `gorm:"not null;size:255" json:"-"`
+	IsAdmin   bool       `json:"is_admin"`
 	LastSeen  *time.Time `json:"last_seen"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
@@ -72,4 +75,27 @@ type Token struct {
 	RefreshBy    time.Time `json:"refresh_by"`
 	accessToken  string
 	refreshToken string
+}
+
+// Migrate the schema based on the models defined below.
+func Migrate(db *gorm.DB) (err error) {
+	// Migrate auth models
+	db.AutoMigrate(&User{}, &Token{})
+	db.Model(&Token{}).AddForeignKey("user_id", "users(id)", "CASCADE", "RESTRICT")
+
+	// Migrate todo models
+	db.AutoMigrate(&Todo{}, &List{})
+	db.Model(&Todo{}).AddForeignKey("user_id", "users(id)", "RESTRICT", "RESTRICT")
+	db.Model(&Todo{}).AddForeignKey("list_id", "lists(id)", "CASCADE", "RESTRICT")
+	db.Model(&List{}).AddForeignKey("user_id", "users(id)", "RESTRICT", "RESTRICT")
+
+	errors := db.GetErrors()
+	if len(errors) > 1 {
+		return fmt.Errorf("%d errors occurred during migration", len(errors))
+	}
+
+	if len(errors) == 1 {
+		return errors[0]
+	}
+	return nil
 }
