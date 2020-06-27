@@ -24,7 +24,24 @@ func main() {
 			Usage:    "run a todos server",
 			Action:   serve,
 			Category: "server",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "a, addr",
+					Usage: "specify an ip address to bind on",
+				},
+				cli.IntFlag{
+					Name:  "p, port",
+					Usage: "specify the port to bind on",
+				},
+				cli.BoolFlag{
+					Name:  "s, tls",
+					Usage: "use tls with the server (requires domain)",
+				},
+				cli.StringFlag{
+					Name:  "d, domain",
+					Usage: "specify the domain of the server for tls",
+				},
+			},
 		},
 	}
 
@@ -37,11 +54,36 @@ func main() {
 //===========================================================================
 
 func serve(c *cli.Context) (err error) {
-	var api *todos.API
-	if api, err = todos.New(); err != nil {
+	// The configuration is primarily loaded from the environment and defaults
+	var conf todos.Settings
+	if conf, err = todos.Config(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
+	// Update the configuration from the CLI flags
+	if addr := c.String("addr"); addr != "" {
+		conf.Bind = addr
+	}
+
+	if port := c.Int("port"); port > 0 {
+		conf.Port = port
+	}
+
+	if useTLS := c.Bool("tls"); useTLS {
+		conf.UseTLS = useTLS
+	}
+
+	if domain := c.String("domain"); domain != "" {
+		conf.Domain = domain
+	}
+
+	// Create the API server
+	var api *todos.API
+	if api, err = todos.New(conf); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	// Run the API server
 	if err = api.Serve(); err != nil {
 		return cli.NewExitError(err, 1)
 	}

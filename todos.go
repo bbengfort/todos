@@ -19,9 +19,12 @@ import (
 // Version of the TODOs application
 const Version = "1.0"
 
+var logger = log.New(os.Stderr, "[todos] ", log.LstdFlags)
+
 // API is the Todo server that wraps all context and variables for the handlers.
 type API struct {
 	sync.RWMutex
+	conf    Settings     // configuration of the server
 	srv     *http.Server // handle to a custom http server with specified API defaults
 	router  *gin.Engine  // the http handler and associated middle ware (used for testing)
 	db      *gorm.DB     // connection to the database through GORM
@@ -33,9 +36,11 @@ type API struct {
 	tokens map[uuid.UUID]Token
 }
 
-// New creates a Todos API server with the specified options, ready for running.
-func New() (api *API, err error) {
+// New creates a Todos API server with the specified settings, fully initialized and
+// ready to be run, but without causing any connections to be established.
+func New(conf Settings) (api *API, err error) {
 	api = &API{
+		conf:    conf,
 		healthy: false,
 		done:    make(chan bool),
 	}
@@ -45,6 +50,7 @@ func New() (api *API, err error) {
 	api.tokens = make(map[uuid.UUID]Token)
 
 	// Create the router
+	gin.SetMode(api.conf.Mode)
 	api.router = gin.Default()
 	if err = api.setupRoutes(); err != nil {
 		return nil, err
@@ -52,7 +58,7 @@ func New() (api *API, err error) {
 
 	// Create the http server
 	api.srv = &http.Server{
-		Addr:         ":8080",
+		Addr:         api.conf.Addr(),
 		Handler:      api.router,
 		ErrorLog:     log.New(os.Stderr, "[http] ", log.LstdFlags),
 		ReadTimeout:  5 * time.Second,
@@ -68,20 +74,26 @@ func (s *API) Serve() (err error) {
 	s.setHealth(true)
 	s.osSignals()
 
-	// TODO: log server is ready to handle requests at %s
+	logger.Printf("todo server listening on %s", s.conf.Endpoint())
 	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 
 	// wait until shutdown is complete
 	<-s.done
-	// TODO: log server(s) stopped
+	logger.Printf("todo server stopped")
 	return nil
+}
+
+// Routes returns the API router and is primarily exposed for testing purposes.
+func (s *API) Routes(healthy bool) http.Handler {
+	s.setHealth(healthy)
+	return s.router
 }
 
 // Shutdown the API server gracefully
 func (s *API) Shutdown() (err error) {
-	// TODO: log shutdown message
+	logger.Printf("gracefully shutting down todo server")
 	s.setHealth(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -106,8 +118,8 @@ func (s *API) setupRoutes() (err error) {
 	// Authentication and user management routes
 	s.router.POST("/login", s.Login)
 	s.router.POST("/logout", s.Logout)
-	s.router.POST("/register", s.Register)
 	s.router.POST("/refresh", s.Refresh)
+	s.router.POST("/register", s.Register) // TODO: make registration admin only
 
 	// Application routes
 	s.router.GET("/", s.Authorize(), s.Overview)

@@ -56,6 +56,7 @@ func (s *API) Register(c *gin.Context) {
 	var err error
 	if user.Password, err = CreateDerivedKey(form.Password); err != nil {
 		// TODO: should panic instead?
+		logger.Printf("could not create derived key: %s", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
 	}
@@ -98,6 +99,7 @@ func (s *API) Login(c *gin.Context) {
 	valid, err := VerifyDerivedKey(user.Password, form.Password)
 	if err != nil {
 		// Panic instead?
+		logger.Printf("could not verify derived key: %s", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 		return
 	}
@@ -112,6 +114,7 @@ func (s *API) Login(c *gin.Context) {
 	token, err := CreateAuthToken(user.ID)
 	if err != nil {
 		// Panic instead?
+		logger.Printf("could not create auth token: %s", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 	}
 
@@ -212,6 +215,7 @@ func (s *API) Refresh(c *gin.Context) {
 	token, err := CreateAuthToken(refresh.UserID)
 	if err != nil {
 		// Panic instead?
+		logger.Printf("could not create auth token: %s", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
 	}
 
@@ -410,11 +414,8 @@ func ParseDerivedKey(encoded string) (dk, salt []byte, time, memory uint32, thre
 // JWT constants for access and refresh tokens
 // See: https://www.cloudjourney.io/articles/security/jwt_in_golang-su/
 const (
-	// jwtAccessTokenDuration  = 4 * time.Hour
-	// jwtRefreshTokenDuration = 12 * time.Hour
-	// jwtAccessRefreshOverlap = -1 * time.Minute
-	jwtAccessTokenDuration  = 2 * time.Minute
-	jwtRefreshTokenDuration = 12 * time.Minute
+	jwtAccessTokenDuration  = 4 * time.Hour
+	jwtRefreshTokenDuration = 12 * time.Hour
 	jwtAccessRefreshOverlap = -1 * time.Minute
 	jwtAccessTokenAudience  = "access"
 	jwtRefreshTokenAudience = "refresh"
