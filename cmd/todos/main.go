@@ -1,19 +1,17 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/bbengfort/todos"
-	"github.com/howeyc/gopass"
+	"github.com/bbengfort/todos/client"
 	"github.com/jinzhu/gorm"
 	"github.com/joho/godotenv"
 	"gopkg.in/urfave/cli.v1"
+	"gopkg.in/yaml.v3"
 
 	// Load database dialects for use with gorm
 	_ "github.com/jinzhu/gorm/dialects/postgres"
@@ -79,6 +77,44 @@ func main() {
 				},
 			},
 		},
+		{
+			Name:     "configure",
+			Usage:    "configure the local client to connect to the todos api",
+			Action:   configure,
+			Category: "client",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "e, endpoint",
+					Usage: "specify the endpoint directly without prompting for it",
+				},
+				cli.StringFlag{
+					Name:  "u, username",
+					Usage: "specify the username directly without prompting for it",
+				},
+				cli.BoolFlag{
+					Name:  "p, password",
+					Usage: "prompt to enter a password into the credentials file",
+				},
+				cli.BoolFlag{
+					Name:  "d, dir",
+					Usage: "print the directory containing the configuration and exit",
+				},
+			},
+		},
+		{
+			Name:     "status",
+			Usage:    "make a status request to the server to check if its up",
+			Action:   status,
+			Category: "client",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "login",
+			Usage:    "authenticate with the api server and cache keys",
+			Action:   login,
+			Category: "client",
+			Flags:    []cli.Flag{},
+		},
 	}
 
 	// Run the CLI program
@@ -139,7 +175,6 @@ func createSuperUser(c *cli.Context) (err error) {
 		return cli.NewExitError("specify $DATABASE_URL to create the admin user", 1)
 	}
 
-	reader := bufio.NewReader(os.Stdin)
 	username := c.String("username")
 	email := c.String("email")
 	password := ""
@@ -155,38 +190,18 @@ func createSuperUser(c *cli.Context) (err error) {
 	}
 
 	if username == "" {
-		fmt.Print("username: ")
-		if username, err = reader.ReadString('\n'); err != nil {
-			return cli.NewExitError(err, 1)
-		}
-		username = strings.Replace(username, "\n", "", -1)
+		username = client.Prompt("username", "")
 	}
 
 	if email == "" {
-		fmt.Print("email: ")
-		if email, err = reader.ReadString('\n'); err != nil {
-			return cli.NewExitError(err, 1)
-		}
-		email = strings.Replace(email, "\n", "", -1)
+		email = client.Prompt("email", "")
 	}
 
 	if password == "" {
-		fmt.Printf("password: ")
-		var pbytes, cbytes []byte
-		if pbytes, err = gopass.GetPasswdMasked(); err != nil {
+		password, err = client.PromptPassword("password", true, false)
+		if err != nil {
 			return cli.NewExitError(err, 1)
 		}
-
-		fmt.Printf("confirm password: ")
-		if cbytes, err = gopass.GetPasswdMasked(); err != nil {
-			return cli.NewExitError(err, 1)
-		}
-
-		if !bytes.Equal(pbytes, cbytes) {
-			return cli.NewExitError("passwords do not match", 1)
-		}
-
-		password = string(pbytes)
 	}
 
 	user := &todos.User{
@@ -209,5 +224,82 @@ func createSuperUser(c *cli.Context) (err error) {
 	if c.Bool("generate") {
 		fmt.Printf("%s:%s\n", username, password)
 	}
+	return nil
+}
+
+//===========================================================================
+// Client Commands
+//===========================================================================
+
+func configure(c *cli.Context) (err error) {
+	if c.Bool("dir") {
+		var cdir string
+		if cdir, err = client.Configuration(); err != nil {
+			return cli.NewExitError(err, 1)
+		}
+		fmt.Println(cdir)
+		return
+	}
+
+	// Attempt to load the previous credentials to provide defaults if they exist.
+	creds := client.Credentials{}
+	creds.Load()
+
+	if ep := c.String("endpoint"); ep != "" {
+		creds.Endpoint = ep
+	} else {
+		creds.Endpoint = client.Prompt("endpoint", creds.Endpoint)
+	}
+
+	if un := c.String("username"); un != "" {
+		creds.Username = un
+	} else {
+		creds.Username = client.Prompt("username", creds.Username)
+	}
+
+	if c.Bool("password") {
+		if creds.Password, err = client.PromptPassword("password", true, true); err != nil {
+			return cli.NewExitError(err, 1)
+		}
+	}
+
+	// Write the configuration to disk
+	if err = creds.Dump(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	return nil
+}
+
+func status(c *cli.Context) (err error) {
+	var api *client.Client
+	if api, err = client.New(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var data map[string]interface{}
+	if data, err = api.Status(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var out []byte
+	if out, err = yaml.Marshal(data); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	fmt.Print(string(out))
+	return nil
+}
+
+func login(c *cli.Context) (err error) {
+	var api *client.Client
+	if api, err = client.New(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	if err = api.Login(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
 	return nil
 }
