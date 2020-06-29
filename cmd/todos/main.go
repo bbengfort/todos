@@ -152,7 +152,24 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   todoCreate,
 			Category: "tasks",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "t, title",
+					Usage: "title of the task",
+				},
+				cli.StringFlag{
+					Name:  "d, details",
+					Usage: "additional details of the task (optional)",
+				},
+				cli.UintFlag{
+					Name:  "l, list",
+					Usage: "list to associate task with (optional)",
+				},
+				cli.DurationFlag{
+					Name:  "D, deadline",
+					Usage: "how much time in the future the deadline is (optional)",
+				},
+			},
 		},
 		{
 			Name:     "todo:detail",
@@ -160,7 +177,12 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   todoDetail,
 			Category: "tasks",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "i, id",
+					Usage: "id of the task to get details for (required)",
+				},
+			},
 		},
 		{
 			Name:     "todo:update",
@@ -168,7 +190,36 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   todoUpdate,
 			Category: "tasks",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "i, id",
+					Usage: "id of the task to update (required)",
+				},
+				cli.BoolFlag{
+					Name:  "c, completed",
+					Usage: "mark the task as completed",
+				},
+				cli.BoolFlag{
+					Name:  "a, archived",
+					Usage: "mark the task as archived",
+				},
+				cli.StringFlag{
+					Name:  "t, title",
+					Usage: "title of the task",
+				},
+				cli.StringFlag{
+					Name:  "d, details",
+					Usage: "additional details of the task (optional)",
+				},
+				cli.UintFlag{
+					Name:  "l, list",
+					Usage: "list to associate task with (optional)",
+				},
+				cli.DurationFlag{
+					Name:  "D, deadline",
+					Usage: "how much time in the future the deadline is (optional)",
+				},
+			},
 		},
 		{
 			Name:     "todo:delete",
@@ -176,7 +227,12 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   todoDelete,
 			Category: "tasks",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "i, id",
+					Usage: "id of the task to delete (required)",
+				},
+			},
 		},
 		{
 			Name:     "list:find",
@@ -192,7 +248,20 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   listCreate,
 			Category: "lists",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "t, title",
+					Usage: "title of the list",
+				},
+				cli.StringFlag{
+					Name:  "d, details",
+					Usage: "additional details of the list (optional)",
+				},
+				cli.DurationFlag{
+					Name:  "D, deadline",
+					Usage: "how much time in the future the deadline is (optional)",
+				},
+			},
 		},
 		{
 			Name:     "list:detail",
@@ -200,7 +269,12 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   listDetail,
 			Category: "lists",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "i, id",
+					Usage: "id of the list to get details for (required)",
+				},
+			},
 		},
 		{
 			Name:     "list:update",
@@ -208,7 +282,24 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   listUpdate,
 			Category: "lists",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "i, id",
+					Usage: "id of the list to update (required)",
+				},
+				cli.StringFlag{
+					Name:  "t, title",
+					Usage: "title of the list",
+				},
+				cli.StringFlag{
+					Name:  "d, details",
+					Usage: "additional details of the list (optional)",
+				},
+				cli.DurationFlag{
+					Name:  "D, deadline",
+					Usage: "how much time in the future the deadline is (optional)",
+				},
+			},
 		},
 		{
 			Name:     "list:delete",
@@ -216,7 +307,12 @@ func main() {
 			Before:   setupClientWithLogin,
 			Action:   listDelete,
 			Category: "lists",
-			Flags:    []cli.Flag{},
+			Flags: []cli.Flag{
+				cli.UintFlag{
+					Name:  "i, id",
+					Usage: "id of the list to delete (required)",
+				},
+			},
 		},
 	}
 
@@ -443,51 +539,136 @@ func overview(c *cli.Context) (err error) {
 // TODO: everything from here below just implements the rest client, make better
 
 func todoFind(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var data map[string]interface{}
+	if data, err = todoc.FindTodos(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	todos, ok := data["todos"]
+	if !ok {
+		return cli.NewExitError("could not get todos from response", 1)
+	}
+
+	todoList, ok := todos.([]interface{})
+	if !ok {
+		return cli.NewExitError("could not parse todos list from response", 1)
+	}
+
+	for _, item := range todoList {
+		itemInfo := item.(map[string]interface{})
+		if itemInfo["archived"].(bool) {
+			continue
+		}
+		if itemInfo["completed"].(bool) {
+			fmt.Printf("☑ %0.0f: %s\n", itemInfo["id"].(float64), itemInfo["title"].(string))
+		} else {
+			fmt.Printf("☐ %0.0f: %s\n", itemInfo["id"].(float64), itemInfo["title"].(string))
+		}
+	}
+
 	return nil
 }
 
 func todoCreate(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var deadline time.Time
+	if d := c.Duration("deadline"); d > 0 {
+		deadline = time.Now().Add(d)
+	}
+
+	if err = todoc.CreateTodo(c.String("title"), c.String("details"), c.Uint("list"), deadline); err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	return nil
 }
 
 func todoDetail(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var data map[string]interface{}
+	if data, err = todoc.DetailTodo(c.Uint("id")); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var out []byte
+	if out, err = yaml.Marshal(data); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+	fmt.Print(string(out))
 	return nil
 }
 
 func todoUpdate(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var deadline time.Time
+	if d := c.Duration("deadline"); d > 0 {
+		deadline = time.Now().Add(d)
+	}
+
+	if err = todoc.UpdateTodo(c.Uint("id"), c.String("title"), c.String("details"), c.Uint("list"), c.Bool("completed"), c.Bool("archived"), deadline); err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	return nil
 }
 
 func todoDelete(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	if err = todoc.DeleteTodo(c.Uint("id")); err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	return nil
 }
 
 func listFind(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var data map[string]interface{}
+	if data, err = todoc.FindLists(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var out []byte
+	if out, err = yaml.Marshal(data); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+	fmt.Print(string(out))
 	return nil
 }
 
 func listCreate(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var deadline time.Time
+	if d := c.Duration("deadline"); d > 0 {
+		deadline = time.Now().Add(d)
+	}
+
+	if err = todoc.CreateList(c.String("title"), c.String("details"), deadline); err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	return nil
 }
 
 func listDetail(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var data map[string]interface{}
+	if data, err = todoc.DetailList(c.Uint("id")); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var out []byte
+	if out, err = yaml.Marshal(data); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+	fmt.Print(string(out))
 	return nil
 }
 
 func listUpdate(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	var deadline time.Time
+	if d := c.Duration("deadline"); d > 0 {
+		deadline = time.Now().Add(d)
+	}
+
+	if err = todoc.UpdateList(c.Uint("id"), c.String("title"), c.String("details"), deadline); err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	return nil
 }
 
 func listDelete(c *cli.Context) (err error) {
-	fmt.Println("ACTION!")
+	if err = todoc.DeleteList(c.Uint("id")); err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	return nil
 }
