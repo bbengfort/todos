@@ -13,7 +13,7 @@ func (s *API) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
 		"timestamp": time.Now().Format(time.RFC3339Nano),
-		"version":   Version,
+		"version":   Version(),
 	})
 }
 

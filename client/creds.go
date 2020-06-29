@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
+	"github.com/bbengfort/todos"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/shibukawa/configdir"
 	"gopkg.in/yaml.v3"
@@ -35,6 +37,7 @@ func Configuration() (string, error) {
 // token expires. If the password is stored, then automatic login occurs in this case.
 // Note that the local client can only maintain one set of credentials at a time.
 type Credentials struct {
+	Version  string `yaml:"version"`            // api version to prepend to all path requests
 	Endpoint string `yaml:"endpoint"`           // the endpoint to connect to
 	Username string `yaml:"username,omitempty"` // username to login with (optional)
 	Password string `yaml:"password,omitempty"` // password to login with (optional)
@@ -46,6 +49,8 @@ type Credentials struct {
 		NotBefore time.Time `yaml:"not_before"` // earliest timestamp the access token can be refreshed
 		RefreshBy time.Time `yaml:"refresh_by"` // when the refresh token expires
 	} `yaml:"tokens,omitempty"` // access and refresh tokens for requests
+
+	epurl *url.URL `yaml:"-"` // the endpoint url with the version attached
 }
 
 // Dump the credentials to an OS specific configuration folder.
@@ -92,13 +97,18 @@ func (c *Credentials) Load() (err error) {
 		return fmt.Errorf("could not unmarshal yaml: %s", err)
 	}
 
+	if c.Version == "" {
+		c.Version = strings.Trim(todos.VersionURL(), "/")
+	}
+
 	// Validate that the required fields are available
 	if c.Endpoint == "" {
 		return ErrNoEndpoint
 	}
-	if _, err = url.Parse(c.Endpoint); err != nil {
+	if c.epurl, err = url.Parse(c.Endpoint); err != nil {
 		return err
 	}
+	c.epurl.Path = "/" + c.Version + "/"
 
 	return nil
 }
@@ -124,20 +134,12 @@ func (c *Credentials) IsRefreshable() bool {
 
 // GetURL constructs a complete URL to the specified location from the base endpoint
 func (c *Credentials) GetURL(path string) (_ string, err error) {
-	var (
-		ep  *url.URL
-		ref *url.URL
-	)
+	var ref *url.URL
 
-	if ref, err = url.Parse(path); err != nil {
+	if ref, err = url.Parse(strings.Trim(path, "/")); err != nil {
 		return "", fmt.Errorf("could not parse %q as reference to endpoint: %s", path, err)
 	}
-
-	// TODO: cached parsed endpoint on credentials struct
-	if ep, err = url.Parse(c.Endpoint); err != nil {
-		return "", fmt.Errorf("could not parse %q endpoint: %s", c.Endpoint, err)
-	}
-	return ep.ResolveReference(ref).String(), nil
+	return c.epurl.ResolveReference(ref).String(), nil
 }
 
 // MustGetURL panics if the url or path cannot be parsed
