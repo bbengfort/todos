@@ -115,6 +115,25 @@ func main() {
 			Category: "client",
 			Flags:    []cli.Flag{},
 		},
+		{
+			Name:     "logout",
+			Usage:    "logout of the api server and revoke cached keys",
+			Action:   logout,
+			Category: "client",
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "r, revoke",
+					Usage: "revoke all logins for the user, not just the local one",
+				},
+			},
+		},
+		{
+			Name:     "overview",
+			Usage:    "get the current state of your todos",
+			Action:   overview,
+			Category: "client",
+			Flags:    []cli.Flag{},
+		},
 	}
 
 	// Run the CLI program
@@ -301,5 +320,42 @@ func login(c *cli.Context) (err error) {
 		return cli.NewExitError(err, 1)
 	}
 
+	return nil
+}
+
+func logout(c *cli.Context) (err error) {
+	var api *client.Client
+	if api, err = client.New(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	if err = api.Logout(c.Bool("revoke")); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	return nil
+}
+
+func overview(c *cli.Context) (err error) {
+	var api *client.Client
+	if api, err = client.New(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	if err = api.CheckLogin(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var data map[string]interface{}
+	if data, err = api.Overview(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	var out []byte
+	if out, err = yaml.Marshal(data); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+
+	fmt.Print(string(out))
 	return nil
 }

@@ -10,4 +10,5 @@ var (
 	ErrNoEndpoint      = errors.New("no endpoint specified in credentials, run configure")
 	ErrLoggedIn        = errors.New("already logged in, logout before logging in again")
 	ErrNotLoggedIn     = errors.New("not logged in, run the login command first")
+	ErrNotRefreshable  = errors.New("cannot refresh tokens, please login again")
 )

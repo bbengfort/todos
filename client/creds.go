@@ -193,3 +193,15 @@ func parseToken(tks string) (_ *jwt.StandardClaims, err error) {
 	}
 	return claims, nil
 }
+
+// Revoke the tokens in the credentials file and overwrite the previous file.
+func (c *Credentials) Revoke() (err error) {
+	c.Tokens.Access = ""
+	c.Tokens.Refresh = ""
+	c.Tokens.IssuedAt = time.Time{}
+	c.Tokens.ExpiresAt = time.Time{}
+	c.Tokens.NotBefore = time.Time{}
+	c.Tokens.RefreshBy = time.Time{}
+
+	return c.Dump()
+}
