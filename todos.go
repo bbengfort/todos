@@ -19,7 +19,7 @@ import (
 )
 
 // Version of the TODOs application
-const Version = "1.0"
+const Version = "1.1"
 
 var logger = log.New(os.Stderr, "[todos] ", log.LstdFlags)
 
