@@ -18,9 +18,6 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
-// Version of the TODOs application
-const Version = "1.1"
-
 var logger = log.New(os.Stderr, "[todos] ", log.LstdFlags)
 
 // API is the Todo server that wraps all context and variables for the handlers.
@@ -120,34 +117,45 @@ func (s *API) setupRoutes() (err error) {
 	authorize := s.Authorize()
 	administrative := s.Administrative()
 
-	// Heartbeat route
-	s.router.GET("/status", s.Status)
+	// Redirect the root to the current version root
+	s.router.GET("/", s.RedirectVersion)
 
-	// Authentication and user management routes
-	s.router.POST("/login", s.Login)
-	s.router.POST("/logout", s.Logout)
-	s.router.POST("/refresh", s.Refresh)
-	s.router.POST("/register", authorize, administrative, s.Register)
-
-	// Application routes
-	s.router.GET("/", authorize, s.Overview)
-	todos := s.router.Group("/todos", authorize)
+	// V1 API
+	v1 := s.router.Group(VersionURL())
 	{
-		todos.GET("", s.FindTodos)
-		todos.POST("", s.CreateTodo)
-		todos.GET("/:id", s.DetailTodo)
-		todos.PUT("/:id", s.UpdateTodo)
-		todos.DELETE("/:id", s.DeleteTodo)
+		// Heartbeat route
+		v1.GET("/status", s.Status)
+
+		// Authentication and user management routes
+		v1.POST("/login", s.Login)
+		v1.POST("/logout", s.Logout)
+		v1.POST("/refresh", s.Refresh)
+		v1.POST("/register", authorize, administrative, s.Register)
+
+		// Application routes
+		v1.GET("/", authorize, s.Overview)
+		todos := v1.Group("/todos", authorize)
+		{
+			todos.GET("", s.FindTodos)
+			todos.POST("", s.CreateTodo)
+			todos.GET("/:id", s.DetailTodo)
+			todos.PUT("/:id", s.UpdateTodo)
+			todos.DELETE("/:id", s.DeleteTodo)
+		}
+
+		lists := v1.Group("/lists", authorize)
+		{
+			lists.GET("", s.FindLists)
+			lists.POST("", s.CreateList)
+			lists.GET("/:id", s.DetailList)
+			lists.PUT("/:id", s.UpdateList)
+			lists.DELETE("/:id", s.DeleteList)
+		}
 	}
 
-	lists := s.router.Group("/lists", authorize)
-	{
-		lists.GET("", s.FindLists)
-		lists.POST("", s.CreateList)
-		lists.GET("/:id", s.DetailList)
-		lists.PUT("/:id", s.UpdateList)
-		lists.DELETE("/:id", s.DeleteList)
-	}
+	// NotFound and NotAllowed requests
+	s.router.NoRoute(NotFound)
+	s.router.NoMethod(NotAllowed)
 
 	return nil
 }

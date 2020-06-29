@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bbengfort/todos"
@@ -24,7 +25,7 @@ func main() {
 	// Instantiate the CLI application
 	app := cli.NewApp()
 	app.Name = "todos"
-	app.Version = todos.Version
+	app.Version = todos.Version()
 	app.Usage = "a simple todos server and CLI for personal task tracking"
 
 	app.Commands = []cli.Command{
@@ -463,6 +464,15 @@ func configure(c *cli.Context) (err error) {
 	// Attempt to load the previous credentials to provide defaults if they exist.
 	creds := client.Credentials{}
 	creds.Load()
+
+	if vs := c.String("version"); vs != "" {
+		creds.Version = vs
+	} else {
+		if creds.Version == "" {
+			creds.Version = strings.Trim(todos.VersionURL(), "/")
+		}
+		creds.Version = client.Prompt("version", creds.Version)
+	}
 
 	if ep := c.String("endpoint"); ep != "" {
 		creds.Endpoint = ep
