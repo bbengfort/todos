@@ -104,6 +104,7 @@ func main() {
 		{
 			Name:     "status",
 			Usage:    "make a status request to the server to check if its up",
+			Before:   setupClient,
 			Action:   status,
 			Category: "client",
 			Flags:    []cli.Flag{},
@@ -111,6 +112,7 @@ func main() {
 		{
 			Name:     "login",
 			Usage:    "authenticate with the api server and cache keys",
+			Before:   setupClient,
 			Action:   login,
 			Category: "client",
 			Flags:    []cli.Flag{},
@@ -118,6 +120,7 @@ func main() {
 		{
 			Name:     "logout",
 			Usage:    "logout of the api server and revoke cached keys",
+			Before:   setupClient,
 			Action:   logout,
 			Category: "client",
 			Flags: []cli.Flag{
@@ -130,8 +133,89 @@ func main() {
 		{
 			Name:     "overview",
 			Usage:    "get the current state of your todos",
+			Before:   setupClientWithLogin,
 			Action:   overview,
 			Category: "client",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "todo:find",
+			Usage:    "list the todos stored in the server",
+			Before:   setupClientWithLogin,
+			Action:   todoFind,
+			Category: "tasks",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "todo:create",
+			Usage:    "create a todo from the specified arguments",
+			Before:   setupClientWithLogin,
+			Action:   todoCreate,
+			Category: "tasks",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "todo:detail",
+			Usage:    "print the specifics for a given todo",
+			Before:   setupClientWithLogin,
+			Action:   todoDetail,
+			Category: "tasks",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "todo:update",
+			Usage:    "update a todo with new information",
+			Before:   setupClientWithLogin,
+			Action:   todoUpdate,
+			Category: "tasks",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "todo:delete",
+			Usage:    "delete a todo from the database",
+			Before:   setupClientWithLogin,
+			Action:   todoDelete,
+			Category: "tasks",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "list:find",
+			Usage:    "list the todo lists stored in the server",
+			Before:   setupClientWithLogin,
+			Action:   listFind,
+			Category: "lists",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "list:create",
+			Usage:    "create a list from the specified arguments",
+			Before:   setupClientWithLogin,
+			Action:   listCreate,
+			Category: "lists",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "list:detail",
+			Usage:    "print the specifics for a given list",
+			Before:   setupClientWithLogin,
+			Action:   listDetail,
+			Category: "lists",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "list:update",
+			Usage:    "update a list with new information",
+			Before:   setupClientWithLogin,
+			Action:   listUpdate,
+			Category: "lists",
+			Flags:    []cli.Flag{},
+		},
+		{
+			Name:     "list:delete",
+			Usage:    "delete a list from the database",
+			Before:   setupClientWithLogin,
+			Action:   listDelete,
+			Category: "lists",
 			Flags:    []cli.Flag{},
 		},
 	}
@@ -250,6 +334,26 @@ func createSuperUser(c *cli.Context) (err error) {
 // Client Commands
 //===========================================================================
 
+var todoc *client.Client
+
+func setupClient(c *cli.Context) (err error) {
+	if todoc, err = client.New(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+	return nil
+}
+
+func setupClientWithLogin(c *cli.Context) (err error) {
+	if err = setupClient(c); err != nil {
+		return err
+	}
+
+	if err = todoc.CheckLogin(); err != nil {
+		return cli.NewExitError(err, 1)
+	}
+	return nil
+}
+
 func configure(c *cli.Context) (err error) {
 	if c.Bool("dir") {
 		var cdir string
@@ -291,13 +395,8 @@ func configure(c *cli.Context) (err error) {
 }
 
 func status(c *cli.Context) (err error) {
-	var api *client.Client
-	if api, err = client.New(); err != nil {
-		return cli.NewExitError(err, 1)
-	}
-
 	var data map[string]interface{}
-	if data, err = api.Status(); err != nil {
+	if data, err = todoc.Status(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
@@ -311,12 +410,7 @@ func status(c *cli.Context) (err error) {
 }
 
 func login(c *cli.Context) (err error) {
-	var api *client.Client
-	if api, err = client.New(); err != nil {
-		return cli.NewExitError(err, 1)
-	}
-
-	if err = api.Login(); err != nil {
+	if err = todoc.Login(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
@@ -324,12 +418,7 @@ func login(c *cli.Context) (err error) {
 }
 
 func logout(c *cli.Context) (err error) {
-	var api *client.Client
-	if api, err = client.New(); err != nil {
-		return cli.NewExitError(err, 1)
-	}
-
-	if err = api.Logout(c.Bool("revoke")); err != nil {
+	if err = todoc.Logout(c.Bool("revoke")); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
@@ -337,17 +426,8 @@ func logout(c *cli.Context) (err error) {
 }
 
 func overview(c *cli.Context) (err error) {
-	var api *client.Client
-	if api, err = client.New(); err != nil {
-		return cli.NewExitError(err, 1)
-	}
-
-	if err = api.CheckLogin(); err != nil {
-		return cli.NewExitError(err, 1)
-	}
-
 	var data map[string]interface{}
-	if data, err = api.Overview(); err != nil {
+	if data, err = todoc.Overview(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
@@ -357,5 +437,57 @@ func overview(c *cli.Context) (err error) {
 	}
 
 	fmt.Print(string(out))
+	return nil
+}
+
+// TODO: everything from here below just implements the rest client, make better
+
+func todoFind(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func todoCreate(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func todoDetail(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func todoUpdate(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func todoDelete(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func listFind(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func listCreate(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func listDetail(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func listUpdate(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
+	return nil
+}
+
+func listDelete(c *cli.Context) (err error) {
+	fmt.Println("ACTION!")
 	return nil
 }
