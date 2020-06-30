@@ -184,6 +184,11 @@ func (s *API) setupDatabase() (err error) {
 		return err
 	}
 
+	// Disable logger unless we're in debug mode
+	if s.conf.Mode != gin.DebugMode {
+		s.db.LogMode(false)
+	}
+
 	// Migrate the database to the latest schema
 	if err = Migrate(s.db); err != nil {
 		return err

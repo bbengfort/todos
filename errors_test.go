@@ -12,6 +12,7 @@ import (
 )
 
 func TestNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 	r := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(r)
 	NotFound(ctx)
@@ -28,6 +29,7 @@ func TestNotFound(t *testing.T) {
 }
 
 func TestNotAllowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 	r := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(r)
 	NotAllowed(ctx)

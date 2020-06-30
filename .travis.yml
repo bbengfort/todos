@@ -1,0 +1,16 @@
+language: go
+
+go:
+  - "1.14"
+
+script: go test -v --cover --race ./...
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
+
+notifications:
+  email:
+    recipients:
+      - benjamin@bengfort.com
+    on_success: change
+    on_failure: always

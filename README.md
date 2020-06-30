@@ -1,5 +1,11 @@
 # TODOs
 
+[![GoDoc](https://godoc.org/github.com/bbengfort/todos?status.svg)](https://godoc.org/github.com/bbengfort/todos)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bbengfort/todos)](https://goreportcard.com/report/github.com/bbengfort/todos)
+[![Build Status](https://travis-ci.com/bbengfort/todos.svg?branch=master)](https://travis-ci.com/bbengfort/todos)
+[![codecov](https://codecov.io/gh/bbengfort/todos/branch/master/graph/badge.svg)](https://codecov.io/gh/bbengfort/todos)
+
+
 **Simple TODO API for personal task tracking (written in Go)**
 
 Building task/todo apps seems to be the "shooting hoops" of development -- good practice to test a lot of different components and technologies. In this case, I'm working with the following technologies:
