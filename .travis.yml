@@ -3,7 +3,7 @@ language: go
 go:
   - "1.14"
 
-script: go test -v --cover --race ./...
+script: go test -v -coverprofile=coverage.txt -covermode=atomic --race ./...
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)
