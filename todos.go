@@ -16,6 +16,7 @@ import (
 
 	// Load database dialects for use with gorm
 	_ "github.com/jinzhu/gorm/dialects/postgres"
+	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
 var logger = log.New(os.Stderr, "[todos] ", log.LstdFlags)
@@ -68,7 +69,7 @@ func New(conf Settings) (api *API, err error) {
 
 // Serve the Todos API with the internal http server and specified routes.
 func (s *API) Serve() (err error) {
-	s.setHealth(true)
+	s.SetHealth(true)
 	s.osSignals()
 
 	logger.Printf("todo server listening on %s", s.conf.Endpoint())
@@ -82,16 +83,10 @@ func (s *API) Serve() (err error) {
 	return nil
 }
 
-// Routes returns the API router and is primarily exposed for testing purposes.
-func (s *API) Routes(healthy bool) http.Handler {
-	s.setHealth(healthy)
-	return s.router
-}
-
 // Shutdown the API server gracefully
 func (s *API) Shutdown() (err error) {
 	logger.Printf("gracefully shutting down todo server")
-	s.setHealth(false)
+	s.SetHealth(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -109,6 +104,25 @@ func (s *API) Shutdown() (err error) {
 
 	close(s.done)
 	return nil
+}
+
+// SetHealth sets the health status on the API server, putting it into maintenance mode
+// if health is false, and removing maintenance mode if health is true. Here primarily
+// for testing purposes since it is unlikely an outside caller can access this.
+func (s *API) SetHealth(health bool) {
+	s.Lock()
+	s.healthy = health
+	s.Unlock()
+}
+
+// Routes returns the API router and is primarily exposed for testing purposes.
+func (s *API) Routes() http.Handler {
+	return s.router
+}
+
+// DB returns the gorm database and is primarily exposed for testing purposes.
+func (s *API) DB() *gorm.DB {
+	return s.db
 }
 
 func (s *API) setupRoutes() (err error) {
@@ -161,8 +175,12 @@ func (s *API) setupRoutes() (err error) {
 }
 
 func (s *API) setupDatabase() (err error) {
-	// TODO: support dialects other than postgres?
-	if s.db, err = gorm.Open("postgres", s.conf.DatabaseURL); err != nil {
+	var dialect string
+	if dialect, err = s.conf.DBDialect(); err != nil {
+		return err
+	}
+
+	if s.db, err = gorm.Open(dialect, s.conf.DatabaseURL); err != nil {
 		return err
 	}
 
@@ -172,12 +190,6 @@ func (s *API) setupDatabase() (err error) {
 	}
 
 	return nil
-}
-
-func (s *API) setHealth(health bool) {
-	s.Lock()
-	s.healthy = health
-	s.Unlock()
 }
 
 func (s *API) osSignals() {

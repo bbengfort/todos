@@ -8,6 +8,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAuth(t *testing.T) {
+	// TODO: Register a user
+	// TODO: Attempt login with bad password
+	// TODO: Login with good password
+	// TODO: Verify auth token gives access
+	// TODO: test authenticate middleware
+	// TODO: ensure that only small state is stored in user context
+	// TODO: Test administrative middleware
+	// TODO: Test refresh mechanism
+	// TODO: Test logout
+	// TODO: Test logout revokes refresh
+	// TODO: Test multiple login
+	// TODO: Test logout revoke all
+}
+
+func TestUserPassword(t *testing.T) {
+	t.Skip("requires database")
+
+	// TODO: test password
+	// TODO: test verify password
+	// TODO: ensure password isn't stored on user model
+}
+
 func TestPasswordDerivedKey(t *testing.T) {
 	pw, err := CreateDerivedKey("supersecretpassword")
 	require.NoError(t, err)
@@ -33,6 +56,7 @@ func TestPasswordDerivedKey(t *testing.T) {
 }
 
 func TestAuthTokens(t *testing.T) {
+	t.Skip("test requires database mock")
 	token, err := CreateAuthToken(nil, 42)
 	require.NoError(t, err)
 	require.NotZero(t, token, "no token struct was returned")
@@ -53,16 +77,4 @@ func TestAuthTokens(t *testing.T) {
 	rid, err := VerifyAuthToken(rt, false, true)
 	require.Error(t, err)
 	require.Equal(t, uuid.Nil, rid)
-}
-
-func TestAuth(t *testing.T) {
-	// TODO: Register a user
-	// TODO: Attempt login with bad password
-	// TODO: Login with good password
-	// TODO: Verify auth token gives access
-	// TODO: Test refresh mechanism
-	// TODO: Test logout
-	// TODO: Test logout revokes refresh
-	// TODO: Test multiple login
-	// TODO: Test logout revoke all
 }
