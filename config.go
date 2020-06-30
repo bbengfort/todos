@@ -30,13 +30,14 @@ func Config() (conf Settings, err error) {
 // that I'm particularly fond of, but it's late and I'm not sure how to mock the
 // internal database without a big mess of spaghetti.
 type Settings struct {
-	Mode        string `default:"debug"`
-	UseTLS      bool   `default:"false"`
-	Bind        string `default:"127.0.0.1"`
-	Port        int    `default:"8080" required:"true"`
-	Domain      string `default:"localhost"`
-	SecretKey   string `envconfig:"SECRET_KEY" required:"true"`
-	DatabaseURL string `envconfig:"DATABASE_URL" required:"true"`
+	Mode         string `default:"debug"`
+	UseTLS       bool   `default:"false"`
+	Bind         string `default:"127.0.0.1"`
+	Port         int    `default:"8080" required:"true"`
+	Domain       string `default:"localhost"`
+	SecretKey    string `envconfig:"SECRET_KEY" required:"true"`
+	DatabaseURL  string `envconfig:"DATABASE_URL" required:"true"`
+	TokenCleanup bool   `default:"true" split_words:"true"`
 }
 
 // Addr returns the IPADDR:PORT to listen on

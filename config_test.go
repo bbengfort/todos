@@ -9,9 +9,10 @@ import (
 )
 
 var requiredEnv = map[string]string{
-	"TODOS_MODE":   "test",
-	"DATABASE_URL": "postgres://benjamin@localhost:5432/todos",
-	"SECRET_KEY":   "supersecretkey",
+	"TODOS_MODE":          "test",
+	"DATABASE_URL":        "postgres://benjamin@localhost:5432/todos",
+	"SECRET_KEY":          "supersecretkey",
+	"TODOS_TOKEN_CLEANUP": "false",
 }
 
 func unsetEnv(t *testing.T) func() {
@@ -35,6 +36,7 @@ func TestConfig(t *testing.T) {
 	// Check defaults
 	require.Equal(t, "127.0.0.1:8080", conf.Addr())
 	require.Equal(t, "http://localhost:8080/", conf.Endpoint())
+	require.False(t, conf.TokenCleanup)
 }
 
 func TestBadConfigs(t *testing.T) {

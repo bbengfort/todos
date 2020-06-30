@@ -72,6 +72,11 @@ func (s *API) Serve() (err error) {
 	s.SetHealth(true)
 	s.osSignals()
 
+	// Run services
+	if s.conf.TokenCleanup {
+		go s.TokensCleanupService()
+	}
+
 	logger.Printf("todo server listening on %s", s.conf.Endpoint())
 	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
