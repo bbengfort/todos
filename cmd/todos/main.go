@@ -79,6 +79,23 @@ func main() {
 			},
 		},
 		{
+			Name:     "cleanup",
+			Usage:    "run database cleanup commands",
+			Action:   cleanup,
+			Category: "server",
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "t, no-tokens",
+					Usage: "do not clean up access tokens",
+				},
+				cli.StringFlag{
+					Name:   "d, db",
+					Usage:  "database connection uri",
+					EnvVar: "DATABASE_URL",
+				},
+			},
+		},
+		{
 			Name:     "configure",
 			Usage:    "configure the local client to connect to the todos api",
 			Action:   configure,
@@ -374,6 +391,7 @@ func createSuperUser(c *cli.Context) (err error) {
 	} else {
 		return cli.NewExitError("specify $DATABASE_URL to create the admin user", 1)
 	}
+	defer db.Close()
 
 	username := c.String("username")
 	email := c.String("email")
@@ -424,6 +442,28 @@ func createSuperUser(c *cli.Context) (err error) {
 	if c.Bool("generate") {
 		fmt.Printf("%s:%s\n", username, password)
 	}
+	return nil
+}
+
+func cleanup(c *cli.Context) (err error) {
+	var db *gorm.DB
+	if dburl := c.String("db"); dburl != "" {
+		if db, err = gorm.Open("postgres", dburl); err != nil {
+			return cli.NewExitError(err, 1)
+		}
+	} else {
+		return cli.NewExitError("specify $DATABASE_URL to create the admin user", 1)
+	}
+	defer db.Close()
+
+	if !c.Bool("no-tokens") {
+		var rows int
+		if rows, err = todos.TokensCleanup(db); err != nil {
+			return cli.NewExitError(fmt.Errorf("could not clean up tokens: %s", err), 1)
+		}
+		fmt.Printf("- cleaned up %d tokens\n", rows)
+	}
+
 	return nil
 }
 
