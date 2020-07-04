@@ -1,0 +1,26 @@
+version: '3.0'
+services:
+  api:
+    build: .
+    ports:
+    - 8080:8080
+    links:
+    - postgres
+    environment:
+    - TODOS_MODE=debug
+    - TODOS_BIND=0.0.0.0
+    - SECRET_KEY=crazysecretsquirrel
+    - DATABASE_URL=postgres://todos:supersecret@postgres:5432/todos?sslmode=disable
+  postgres:
+    image: postgres
+    environment:
+    - POSTGRES_DB=todos
+    - POSTGRES_USER=todos
+    - POSTGRES_PASSWORD=supersecret
+    ports:
+    - 5432:5432
+    volumes:
+    - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
+    driver: local
