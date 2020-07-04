@@ -3,11 +3,15 @@ package client
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/bbengfort/todos"
 )
 
 // Login to the todos API, saving the access tokens to disk for use during other
 // sessions. If the password is in the credentials, login executes directly, otherwise
-// it prompts the user for the password.
+// it prompts the user for the password. This is not a standard API client request, e.g.
+// it does not take a LoginRequest and return a LoginResponse. Instead this method
+// entirely manages the login process on behalf of the user.
 func (c *Client) Login() (err error) {
 	// If we're already logged in, return an error (must logout first)
 	if c.creds.IsLoggedIn() {
@@ -15,17 +19,18 @@ func (c *Client) Login() (err error) {
 	}
 
 	// Build data request
-	data := make(map[string]interface{})
-	data["username"] = c.creds.Username
-	data["password"] = c.creds.Password
-	data["no_cookie"] = true
-
-	if c.creds.Username == "" {
-		data["username"] = Prompt("username", "")
+	data := &todos.LoginRequest{
+		Username: c.creds.Username,
+		Password: c.creds.Password,
+		NoCookie: true,
 	}
 
-	if c.creds.Password == "" {
-		if data["password"], err = PromptPassword("password", true, false); err != nil {
+	if data.Username == "" {
+		data.Username = Prompt("username", "")
+	}
+
+	if data.Password == "" {
+		if data.Password, err = PromptPassword("password", true, false); err != nil {
 			return err
 		}
 	}
@@ -37,14 +42,14 @@ func (c *Client) Login() (err error) {
 	}
 
 	var status int
-	var tokens map[string]interface{}
-	if tokens, status, err = c.Do(req); err != nil {
+	var tokens *todos.LoginResponse
+	if status, err = c.Do(req, &tokens); err != nil {
 		return err
 	}
 
-	if status != http.StatusOK {
-		// TODO: better error handling here
-		return fmt.Errorf("got a %s status", http.StatusText(status))
+	// Handle the error if we don't get an ok or a success message
+	if status != http.StatusOK || !tokens.Success {
+		return StatusError(status, tokens.Error)
 	}
 
 	// Set the tokens on the credentials and save them to disk
@@ -56,7 +61,8 @@ func (c *Client) Login() (err error) {
 
 // Logout issues a logout request to the server then clears cached tokens locally.
 // If revokeAll is true, then the server will remove all outstanding tokens, not just
-// the token posted by the current client.
+// the token posted by the current client. If the logout succeeds, then the cached
+// tokens are revoked, but they are not deleted if the request fails.
 func (c *Client) Logout(revokeAll bool) (err error) {
 	if !c.creds.IsLoggedIn() {
 		if c.creds.IsRefreshable() {
@@ -72,8 +78,9 @@ func (c *Client) Logout(revokeAll bool) (err error) {
 	}
 
 	// Create the logout request
-	data := make(map[string]interface{})
-	data["revoke_all"] = revokeAll
+	data := &todos.LogoutRequest{
+		RevokeAll: revokeAll,
+	}
 
 	var req *http.Request
 	if req, err = c.NewRequest(http.MethodPost, "/logout", true, data); err != nil {
@@ -81,14 +88,20 @@ func (c *Client) Logout(revokeAll bool) (err error) {
 	}
 
 	// Execute the logout request
-	var status int
-	if _, status, err = c.Do(req); err != nil {
+	var (
+		status int
+		rep    *todos.Response
+	)
+	if status, err = c.Do(req, &rep); err != nil {
 		return err
 	}
 
 	// If a bad status code is given, then return an error
-	if !(status == http.StatusOK || status == http.StatusNoContent || status == http.StatusUnauthorized) {
-		return fmt.Errorf("could not logout received status %q", http.StatusText(status))
+	if !(status == http.StatusOK || status == http.StatusNoContent || status == http.StatusUnauthorized) || !rep.Success {
+		if rep.Error == "" {
+			rep.Error = "could not logout the user"
+		}
+		return StatusError(status, rep.Error)
 	}
 
 	// Revoke certificates from the credentials
@@ -107,25 +120,25 @@ func (c *Client) Refresh() (err error) {
 	var (
 		status int
 		req    *http.Request
-		tokens map[string]interface{}
+		tokens *todos.LoginResponse
 	)
 
 	// Build request
-	data := make(map[string]interface{})
-	data["refresh_token"] = c.creds.Tokens.Refresh
-	data["no_cookie"] = true
+	data := &todos.RefreshRequest{
+		RefreshToken: c.creds.Tokens.Refresh,
+		NoCookie:     true,
+	}
 	if req, err = c.NewRequest(http.MethodPost, "/refresh", false, data); err != nil {
 		return err
 	}
 
 	// Execute the request
-	if tokens, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, tokens); err != nil {
 		return err
 	}
 
-	if status != http.StatusOK {
-		// TODO: better error handling here
-		return fmt.Errorf("got a %s status", http.StatusText(status))
+	if status != http.StatusOK || !tokens.Success {
+		return StatusError(status, tokens.Error)
 	}
 
 	// Set the tokens on the credentials and save them to disk

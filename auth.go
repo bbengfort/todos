@@ -28,9 +28,9 @@ import (
 // email is not unique.
 func (s *API) Register(c *gin.Context) {
 	// Bind and parse the POST data
-	form := registerUserForm{}
+	form := RegisterRequest{}
 	if err := c.ShouldBind(&form); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
@@ -45,18 +45,18 @@ func (s *API) Register(c *gin.Context) {
 	if user.Password, err = CreateDerivedKey(form.Password); err != nil {
 		// TODO: should panic instead?
 		logger.Printf("could not create derived key: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
 	// Insert the user into the database
 	if err = s.db.Create(&user).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
 	// Return successful result, user has been created
-	c.JSON(http.StatusCreated, gin.H{"success": true, "username": user.Username})
+	c.JSON(http.StatusCreated, RegisterResponse{Success: true, Username: user.Username})
 }
 
 // Login the user with the specified username and password. Login uses argon2 derived
@@ -67,9 +67,9 @@ func (s *API) Login(c *gin.Context) {
 	// TODO: check if already logged in and return bad request if so (must logout or use refresh)
 
 	// Bind and parse the POST data
-	form := loginUserForm{}
+	form := LoginRequest{}
 	if err := c.ShouldBind(&form); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
@@ -77,11 +77,11 @@ func (s *API) Login(c *gin.Context) {
 	var user User
 	if err := s.db.Select("id, password").Where("username = ?", form.Username).First(&user).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 			return
 		}
 		logger.Printf("could not look up user: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 
 	}
@@ -91,13 +91,13 @@ func (s *API) Login(c *gin.Context) {
 	if err != nil {
 		// Panic instead?
 		logger.Printf("could not verify derived key: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
 	// If password does not match, deny access
 	if !valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 		return
 	}
 
@@ -106,7 +106,7 @@ func (s *API) Login(c *gin.Context) {
 	if err != nil {
 		// Panic instead?
 		logger.Printf("could not create auth token: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
@@ -117,10 +117,10 @@ func (s *API) Login(c *gin.Context) {
 	}
 
 	// Return the tokens for use by the api as Bearer headers
-	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"access_token":  token.accessToken,
-		"refresh_token": token.refreshToken,
+	c.JSON(http.StatusOK, LoginResponse{
+		Success:      true,
+		AccessToken:  token.accessToken,
+		RefreshToken: token.refreshToken,
 	})
 }
 
@@ -131,13 +131,13 @@ func (s *API) Login(c *gin.Context) {
 func (s *API) Logout(c *gin.Context) {
 	tokenString, err := FindToken(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
 	tokenID, err := VerifyAuthToken(tokenString, true, false)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 		return
 	}
 
@@ -145,37 +145,37 @@ func (s *API) Logout(c *gin.Context) {
 	token := Token{ID: tokenID}
 	if err = s.db.Where(&token).First(&token).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 			return
 		}
 		logger.Printf("could not look up token: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
 	// Bind and parse the POST data
-	form := logoutUserForm{}
+	form := LogoutRequest{}
 	if err := c.ShouldBind(&form); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
 	if form.RevokeAll {
 		if err := s.db.Where("user_id = ?", token.UserID).Delete(Token{}).Error; err != nil {
 			logger.Printf("could not delete revoked tokens: %s", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 			return
 		}
 	} else {
 		// Delete just the single token
 		if err := s.db.Delete(&token).Error; err != nil {
 			logger.Printf("could not delete revoked token: %s", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, Response{Success: true})
 }
 
 // Refresh the access token with the refresh token if it's available and valid. The
@@ -188,15 +188,15 @@ func (s *API) Logout(c *gin.Context) {
 // reauthentication than resending a username and password combination.
 func (s *API) Refresh(c *gin.Context) {
 	// Bind and parse the POST data
-	form := refreshTokenForm{}
+	form := RefreshRequest{}
 	if err := c.ShouldBind(&form); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
 	tokenID, err := VerifyAuthToken(form.RefreshToken, false, true)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+		c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 		return
 	}
 
@@ -204,11 +204,11 @@ func (s *API) Refresh(c *gin.Context) {
 	refresh := Token{ID: tokenID}
 	if err = s.db.Where(&refresh).First(&refresh).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 			return
 		}
 		logger.Printf("could not look up token: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
@@ -217,7 +217,7 @@ func (s *API) Refresh(c *gin.Context) {
 	if err != nil {
 		// Panic instead?
 		logger.Printf("could not create auth token: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 	}
 
 	if !form.NoCookie {
@@ -229,15 +229,15 @@ func (s *API) Refresh(c *gin.Context) {
 	// Revoke the old tokens
 	if err := s.db.Delete(&refresh).Error; err != nil {
 		logger.Printf("could not delete revoked token: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
 	// Return the tokens for use by the api as Bearer headers
-	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"access_token":  token.accessToken,
-		"refresh_token": token.refreshToken,
+	c.JSON(http.StatusOK, LoginResponse{
+		Success:      true,
+		AccessToken:  token.accessToken,
+		RefreshToken: token.refreshToken,
 	})
 }
 
@@ -255,14 +255,14 @@ func (s *API) Authorize() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := FindToken(c)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 			c.Abort()
 			return
 		}
 
 		tokenID, err := VerifyAuthToken(tokenString, true, false)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 			c.Abort()
 			return
 		}
@@ -271,12 +271,12 @@ func (s *API) Authorize() gin.HandlerFunc {
 		token := Token{ID: tokenID}
 		if err = s.db.Where(&token).First(&token).Error; err != nil {
 			if gorm.IsRecordNotFoundError(err) {
-				c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+				c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 				c.Abort()
 				return
 			}
 			logger.Printf("could not look up token: %s", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 			c.Abort()
 			return
 		}
@@ -286,7 +286,7 @@ func (s *API) Authorize() gin.HandlerFunc {
 		// TODO: we should make sure that only id, username, and is_admin are populated (maybe also last seen)
 		if err = s.db.Model(&token).Related(&token.User).Error; err != nil {
 			logger.Printf("could not look up user for token: %s", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 			c.Abort()
 			return
 		}
@@ -309,14 +309,14 @@ func (s *API) Administrative() gin.HandlerFunc {
 		val := c.Value(ctxUserKey)
 		if val == nil {
 			logger.Printf("no user stored on context, authenticate middleware must proceed administrative")
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 			c.Abort()
 			return
 		}
 
 		user := val.(User)
 		if !user.IsAdmin {
-			c.JSON(http.StatusUnauthorized, gin.H{"success": false})
+			c.JSON(http.StatusUnauthorized, ErrorResponse(nil))
 			c.Abort()
 			return
 		}

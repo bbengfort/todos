@@ -8,64 +8,75 @@ import (
 	"github.com/jinzhu/gorm"
 )
 
-// Todo is the primary data structure for interacting with the application. Note that
-// while a Todo must be assigned to a User, the data must be manually updated with the
-// UserEmail for serialization (rather than nesting the User object).
-type Todo struct {
-	ID        uint       `gorm:"primary_key" json:"id"`
-	UserID    uint       `json:"-"`
-	User      User       `json:"-"`
-	UserEmail string     `gorm:"-" json:"user"`
-	Title     string     `gorm:"not null;size:255" json:"title" binding:"required"`
-	Details   string     `gorm:"not null;size:4095" json:"details"`
-	Completed bool       `json:"completed"`
-	Archived  bool       `json:"archived"`
-	ListID    *uint      `json:"list,omitempty"`
-	List      *List      `json:"-"`
-	Deadline  *time.Time `json:"deadline,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+// Task is the primary database structure for the todos application and represents a
+// single unit of work that must be completed. Tasks are primarily described by their
+// title, but can also have arbitrary text details stored alongside it. Optionally, each
+// task can have a deadline, which is used for reminders and ordering. Each task is
+// assigned to a user, generally the user that created the task and the task can
+// optionally be assigned to a checklist. The primary modification of a task is to
+// complete it (which marks it as done) or to archive it (deleting it without removal).
+type Task struct {
+	ID          uint       `gorm:"primary_key" json:"id,omitempty"`
+	UserID      uint       `json:"-"`
+	User        User       `json:"-"`
+	Username    string     `gorm:"-" json:"user,omitempty"`
+	Title       string     `gorm:"not null;size:255" json:"title,omitempty" binding:"required"`
+	Details     string     `gorm:"not null;size:4095" json:"details,omitempty"`
+	Completed   bool       `json:"completed"`
+	Archived    bool       `json:"archived"`
+	ChecklistID *uint      `json:"checklist,omitempty"`
+	Checklist   *Checklist `json:"-"`
+	Deadline    *time.Time `json:"deadline,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
-// List groups related Todos so that they can be managed together. A Todo does not have
-// to belong to a list, and there is no "default" list except for any Todo that is not
-// assigned to a list, e.g. the field is nullable. Lists are owned by users, but they
-// are described by the UserEmail which must be manually updated for serialization.
-// Completed, Archived, and Size are used to compute the percentage complete/archived
-// based on the Size (number of items) of the list. These are not stored on the database
-// but are computed from the associated Todos and serialized in response.
-type List struct {
-	ID        uint       `gorm:"primary_key" json:"id"`
+// Checklist groups related tasks so that they can be managed together. A task does not
+// have to belong to a checklist, though it is recommended that all tasks are assigned
+// to a list to prevent them from being stranded. Checklists are owned by individual
+// users, which manage their lists. Similar to tasks, checklists are described by a
+// title and optional details. However, checklists can only be "completed" if all of its
+// tasks are either completed or archived, and this is not directly stored in the
+// database, but is rather computed on demand. Checklists can also have a deadline,
+// which is used for reminders and checklist ordering.
+type Checklist struct {
+	ID        uint       `gorm:"primary_key" json:"id,omitempty"`
 	UserID    uint       `json:"-"`
 	User      User       `json:"-"`
-	UserEmail string     `gorm:"-" json:"user"`
-	Title     string     `gorm:"not null;size:255" json:"title"`
-	Details   string     `gorm:"not null;size:4095" json:"details"`
+	Username  string     `gorm:"-" json:"user,omitempty"`
+	Title     string     `gorm:"not null;size:255" json:"title,omitempty"`
+	Details   string     `gorm:"not null;size:4095" json:"details,omitempty"`
 	Completed uint       `gorm:"-" json:"completed,omitempty"`
 	Archived  uint       `gorm:"-" json:"archived,omitempty"`
 	Size      uint       `gorm:"-" json:"size"`
 	Deadline  *time.Time `json:"deadline,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
-	Todos     []Todo     `json:"todos,omitempty"`
+	Tasks     []Task     `json:"tasks,omitempty"`
 }
 
-// User is primarily used for authentication and storing json web tokens.
+// User is primarily used for authentication and storing json web tokens. Each user in
+// the system manages their own tasks and checklists through the API. This is the
+// primary partitioning mechanism between tasks.
 type User struct {
-	ID        uint       `gorm:"primary_key" json:"id"`
-	Username  string     `gorm:"unique;not null;size:255" json:"username"`
-	Email     string     `gorm:"unique;not null;size:255" json:"email"`
-	Password  string     `gorm:"not null;size:255" json:"-"`
-	IsAdmin   bool       `json:"is_admin"`
-	LastSeen  *time.Time `json:"last_seen"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	Todos     []Todo     `json:"-"`
-	Lists     []List     `json:"-"`
-	Tokens    []Token    `json:"-"`
+	ID            uint        `gorm:"primary_key" json:"id"`
+	Username      string      `gorm:"unique;not null;size:255" json:"username"`
+	Email         string      `gorm:"unique;not null;size:255" json:"email"`
+	Password      string      `gorm:"not null;size:255" json:"-"`
+	IsAdmin       bool        `json:"is_admin"`
+	DefaultListID *uint       `json:"default_checklist,omitempty"`
+	DefaultList   *Checklist  `json:"-"`
+	LastSeen      *time.Time  `json:"last_seen"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+	Tasks         []Task      `json:"-"`
+	Lists         []Checklist `json:"-"`
+	Tokens        []Token     `json:"-"`
 }
 
-// Token holds an access and refresh tokens.
+// Token holds an access and refresh tokens, which are granted after authentication and
+// used to authorize further requests using a Bearer header. The refresh token is used
+// to update authentication without having to submit a login and password again.
 type Token struct {
 	ID           uuid.UUID `gorm:"type:uuid;primary_key" json:"id"`
 	UserID       uint      `gorm:"not null" json:"user_id"`
@@ -83,11 +94,12 @@ func Migrate(db *gorm.DB) (err error) {
 	db.AutoMigrate(&User{}, &Token{})
 	db.Model(&Token{}).AddForeignKey("user_id", "users(id)", "CASCADE", "RESTRICT")
 
-	// Migrate todo models
-	db.AutoMigrate(&Todo{}, &List{})
-	db.Model(&Todo{}).AddForeignKey("user_id", "users(id)", "RESTRICT", "RESTRICT")
-	db.Model(&Todo{}).AddForeignKey("list_id", "lists(id)", "CASCADE", "RESTRICT")
-	db.Model(&List{}).AddForeignKey("user_id", "users(id)", "RESTRICT", "RESTRICT")
+	// Migrate todos models
+	db.AutoMigrate(&Task{}, &Checklist{})
+	db.Model(&Task{}).AddForeignKey("user_id", "users(id)", "RESTRICT", "RESTRICT")
+	db.Model(&Task{}).AddForeignKey("checklist_id", "checklists(id)", "CASCADE", "RESTRICT")
+	db.Model(&Checklist{}).AddForeignKey("user_id", "users(id)", "RESTRICT", "RESTRICT")
+	db.Model(&User{}).AddForeignKey("default_list_id", "checklists(id)", "CASCADE", "RESTRICT")
 
 	errors := db.GetErrors()
 	if len(errors) > 1 {
