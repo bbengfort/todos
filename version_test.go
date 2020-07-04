@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const ExpectedVersion = "1.1"
+const ExpectedVersion = "1.2"
 
 func TestVersion(t *testing.T) {
 	require.Equal(t, ExpectedVersion, todos.Version())

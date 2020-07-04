@@ -10,9 +10,9 @@ import (
 // Version components for detailed version helpers
 const (
 	VersionMajor  = 1
-	VersionMinor  = 1
+	VersionMinor  = 2
 	VersionPatch  = 0
-	VersionSerial = 2
+	VersionSerial = 3
 )
 
 // Version returns the human readable version of the package
