@@ -4,7 +4,7 @@ setup:
       as: DATABASE
 build:
   docker:
-    api: Dockerfile
+    web: Dockerfile
   config:
     TODOS_MODE: release
     TODOS_BIND: 0.0.0.0
