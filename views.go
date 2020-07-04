@@ -17,7 +17,21 @@ const (
 // API, this view requires an authenticated user in the context.
 func (s *API) Overview(c *gin.Context) {
 	user := c.Value(ctxUserKey).(User)
-	c.JSON(http.StatusOK, OverviewResponse{Success: true, User: user.Username})
+	rep := OverviewResponse{Success: true, User: user.Username}
+
+	if err := s.db.Where("user_id = ?", user.ID).Find(&user.Tasks).Count(&rep.Tasks).Error; err != nil {
+		logger.Printf("could not count tasks for user: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
+		return
+	}
+
+	if err := s.db.Where("user_id = ?", user.ID).Find(&user.Lists).Count(&rep.Checklists).Error; err != nil {
+		logger.Printf("could not count checklists for user: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, rep)
 }
 
 //===========================================================================

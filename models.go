@@ -20,8 +20,8 @@ type Task struct {
 	UserID      uint       `json:"-"`
 	User        User       `json:"-"`
 	Username    string     `gorm:"-" json:"user,omitempty"`
-	Title       string     `gorm:"not null;size:255" json:"title" binding:"required"`
-	Details     string     `gorm:"not null;size:4095" json:"details"`
+	Title       string     `gorm:"not null;size:255" json:"title,omitempty" binding:"required"`
+	Details     string     `gorm:"not null;size:4095" json:"details,omitempty"`
 	Completed   bool       `json:"completed"`
 	Archived    bool       `json:"archived"`
 	ChecklistID *uint      `json:"checklist,omitempty"`
@@ -44,8 +44,8 @@ type Checklist struct {
 	UserID    uint       `json:"-"`
 	User      User       `json:"-"`
 	Username  string     `gorm:"-" json:"user,omitempty"`
-	Title     string     `gorm:"not null;size:255" json:"title"`
-	Details   string     `gorm:"not null;size:4095" json:"details"`
+	Title     string     `gorm:"not null;size:255" json:"title,omitempty"`
+	Details   string     `gorm:"not null;size:4095" json:"details,omitempty"`
 	Completed uint       `gorm:"-" json:"completed,omitempty"`
 	Archived  uint       `gorm:"-" json:"archived,omitempty"`
 	Size      uint       `gorm:"-" json:"size"`
