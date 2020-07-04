@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 
@@ -40,6 +42,11 @@ func New(conf Settings) (api *API, err error) {
 		conf:    conf,
 		healthy: false,
 		done:    make(chan bool),
+	}
+
+	// Connect to sentry
+	if err = api.setupSentry(); err != nil {
+		return nil, err
 	}
 
 	// Connect to the database
@@ -131,7 +138,12 @@ func (s *API) DB() *gorm.DB {
 }
 
 func (s *API) setupRoutes() (err error) {
-	// Middleware
+	// Sentry monitoring
+	if s.conf.SentryDSN != "" {
+		s.router.Use(sentrygin.New(sentrygin.Options{Repanic: true, WaitForDelivery: false}))
+	}
+
+	// Application Middleware
 	s.router.Use(s.Available())
 	authorize := s.Authorize()
 	administrative := s.Administrative()
@@ -197,6 +209,29 @@ func (s *API) setupDatabase() (err error) {
 	// Migrate the database to the latest schema
 	if err = Migrate(s.db); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (s *API) setupSentry() (err error) {
+	if s.conf.SentryDSN == "" {
+		// If there is no sentry dsn then do not initialize sentry
+		return nil
+	}
+
+	// Create sentry options
+	opts := sentry.ClientOptions{
+		Dsn:         s.conf.SentryDSN,
+		Debug:       s.conf.Mode == gin.DebugMode,
+		Release:     Version(),
+		ServerName:  s.conf.Domain,
+		Environment: s.conf.Environment(),
+	}
+
+	// Initialize sentry
+	if err = sentry.Init(opts); err != nil {
+		return fmt.Errorf("could not initialize sentry: %s", err)
 	}
 
 	return nil

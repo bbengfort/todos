@@ -37,6 +37,7 @@ type Settings struct {
 	Domain       string `default:"localhost"`
 	SecretKey    string `envconfig:"SECRET_KEY" required:"true"`
 	DatabaseURL  string `envconfig:"DATABASE_URL" required:"true"`
+	SentryDSN    string `envconfig:"SENTRY_DSN"`
 	TokenCleanup bool   `default:"true" split_words:"true"`
 }
 
@@ -71,4 +72,20 @@ func (s Settings) DBDialect() (string, error) {
 	}
 
 	return "", fmt.Errorf("unknown database dialect from %q", s.DatabaseURL)
+}
+
+// Environment returns "production" if gin mode is release, otherwise develop or
+// testing environments respectively. In the future we can configure this directly
+// from the settings if we want "staging" or other environments.
+func (s Settings) Environment() string {
+	switch s.Mode {
+	case gin.ReleaseMode:
+		return "production"
+	case gin.DebugMode:
+		return "development"
+	case gin.TestMode:
+		return "testing"
+	default:
+		return ""
+	}
 }

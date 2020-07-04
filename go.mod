@@ -4,6 +4,7 @@ go 1.14
 
 require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
+	github.com/getsentry/sentry-go v0.6.1
 	github.com/gin-gonic/gin v1.6.3
 	github.com/google/uuid v1.1.1
 	github.com/howeyc/gopass v0.0.0-20190910152052-7cb4b85ec19c
