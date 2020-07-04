@@ -16,7 +16,7 @@ import (
 // optionally be assigned to a checklist. The primary modification of a task is to
 // complete it (which marks it as done) or to archive it (deleting it without removal).
 type Task struct {
-	ID          uint       `gorm:"primary_key" json:"id"`
+	ID          uint       `gorm:"primary_key" json:"id,omitempty"`
 	UserID      uint       `json:"-"`
 	User        User       `json:"-"`
 	Username    string     `gorm:"-" json:"user,omitempty"`
@@ -40,7 +40,7 @@ type Task struct {
 // database, but is rather computed on demand. Checklists can also have a deadline,
 // which is used for reminders and checklist ordering.
 type Checklist struct {
-	ID        uint       `gorm:"primary_key" json:"id"`
+	ID        uint       `gorm:"primary_key" json:"id,omitempty"`
 	UserID    uint       `json:"-"`
 	User      User       `json:"-"`
 	Username  string     `gorm:"-" json:"user,omitempty"`

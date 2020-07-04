@@ -152,21 +152,18 @@ func (c *Credentials) MustGetURL(path string) string {
 }
 
 // SetTokens on the credentials and save the credentials to disk for future use.
-func (c *Credentials) SetTokens(tokens map[string]interface{}) (err error) {
-	var ok bool
-	var access, refresh interface{}
-
-	if access, ok = tokens["access_token"]; !ok {
+func (c *Credentials) SetTokens(tokens *todos.LoginResponse) (err error) {
+	if tokens.AccessToken == "" {
 		return errors.New("response does not contain an access_token")
 	}
 
-	if refresh, ok = tokens["refresh_token"]; !ok {
+	if tokens.RefreshToken == "" {
 		return errors.New("response does not contain an refresh_token")
 	}
 
 	// Set the tokens on the credentials
-	c.Tokens.Access = access.(string)
-	c.Tokens.Refresh = refresh.(string)
+	c.Tokens.Access = tokens.AccessToken
+	c.Tokens.Refresh = tokens.RefreshToken
 
 	// Parse the access token for expiration times
 	ac, err := parseToken(c.Tokens.Access)
