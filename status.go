@@ -10,10 +10,10 @@ import (
 // Status is an unauthenticated endpoint that returns the status of the api server and
 // can be used for heartbeats and liveness checks.
 func (s *API) Status(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"timestamp": time.Now().Format(time.RFC3339Nano),
-		"version":   Version(),
+	c.JSON(http.StatusOK, StatusResponse{
+		Status:    "ok",
+		Timestamp: time.Now(),
+		Version:   Version(),
 	})
 }
 
@@ -27,8 +27,11 @@ func (s *API) Available() gin.HandlerFunc {
 		s.RUnlock()
 
 		if !healthy {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"success": false, "error": "service unavailable",
+			c.JSON(http.StatusServiceUnavailable, StatusResponse{
+				Status:    "unavailable",
+				Error:     "service is currently in maintenance mode",
+				Timestamp: time.Now(),
+				Version:   Version(),
 			})
 			c.Abort()
 			return

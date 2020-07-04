@@ -12,85 +12,92 @@ const (
 	ctxUserKey = "user"
 )
 
-// Overview returns the state of the todos (e.g. the number of tasks and lists for the
-// given user). This request must be authenticated.
+// Overview returns statistics for the authenticated user, e.g. how many tasks and lists
+// are currently open, completed, and archived. Although this is the root view of the
+// API, this view requires an authenticated user in the context.
 func (s *API) Overview(c *gin.Context) {
 	user := c.Value(ctxUserKey).(User)
-	c.JSON(http.StatusOK, gin.H{"tasks": 0, "lists": 0, "user": user.Username})
+	c.JSON(http.StatusOK, OverviewResponse{Success: true, User: user.Username})
 }
 
 //===========================================================================
-// Viewset for Todo objects
+// Viewset for Task objects
 //===========================================================================
 
-// FindTodos returns a all todos for the user, sorted and filtered by the specified
-// input parameters (e.g. by list or by most recent).
+// ListTasks returns all tasks for the authenticated user, sorted and filtered by the
+// specified input parameters (e.g. by list or by most recent).
 // TODO: add filtering by list
 // TODO: add pagination
-func (s *API) FindTodos(c *gin.Context) {
-	user := c.Value(ctxUserKey).(User)
-	var todos []Todo
-	if err := s.db.Where("user_id = ?", user.ID).Find(&todos).Error; err != nil {
-		logger.Printf("could not fetch todos: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+func (s *API) ListTasks(c *gin.Context) {
+	var req ListTasksRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"todos": todos})
+	user := c.Value(ctxUserKey).(User)
+	var tasks []Task
+	if err := s.db.Where("user_id = ?", user.ID).Find(&tasks).Error; err != nil {
+		logger.Printf("could not fetch tasks: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, ListTasksResponse{Success: true, Tasks: tasks})
 }
 
-// CreateTodo creates a new todo in the database.
-func (s *API) CreateTodo(c *gin.Context) {
+// CreateTask creates a new task assigned to the authenticated user in the database.
+func (s *API) CreateTask(c *gin.Context) {
 	// Parse the user input
-	todo := Todo{}
-	if err := c.ShouldBind(&todo); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+	task := Task{}
+	if err := c.ShouldBind(&task); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	// Add the user to the todo
+	// Add the user to the task
 	user := c.Value(ctxUserKey).(User)
-	todo.UserID = user.ID
+	task.UserID = user.ID
 
-	// Create the todo in the database
-	if err := s.db.Create(&todo).Error; err != nil {
-		logger.Printf("could not create todo: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+	// Create the task in the database
+	if err := s.db.Create(&task).Error; err != nil {
+		logger.Printf("could not create task: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"success": true, "todo": todo.ID})
+	c.JSON(http.StatusCreated, CreateTaskResponse{Success: true, TaskID: task.ID})
 }
 
-// DetailTodo returns as much information about the todo as possible.
-// TODO: ensure that the todo belongs to the user!
-func (s *API) DetailTodo(c *gin.Context) {
-	var todo Todo
-	if err := s.db.Where("id = ?", c.Param("id")).First(&todo).Error; err != nil {
+// DetailTask returns as much information about the task as possible.
+// TODO: ensure that the task belongs to the user!
+func (s *API) DetailTask(c *gin.Context) {
+	var task Task
+	if err := s.db.Where("id = ?", c.Param("id")).First(&task).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "not found"})
+			c.JSON(http.StatusNotFound, notFound)
 			return
 		}
-		logger.Printf("could not find todo: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		logger.Printf("could not find task: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "todo": todo})
+	c.JSON(http.StatusOK, DetailTaskResponse{Success: true, Task: task})
 }
 
-// UpdateTodo allows the user to modify a todo.
-// TODO: ensure that the todo belongs to the user!
-func (s *API) UpdateTodo(c *gin.Context) {
-	// Fetch the todo to update
-	todo := Todo{}
-	if err := s.db.Where("id = ?", c.Param("id")).First(&todo).Error; err != nil {
+// UpdateTask allows the user to modify a task.
+// TODO: ensure that the task belongs to the user!
+func (s *API) UpdateTask(c *gin.Context) {
+	// Fetch the task to update
+	task := Task{}
+	if err := s.db.Where("id = ?", c.Param("id")).First(&task).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "not found"})
+			c.JSON(http.StatusNotFound, notFound)
 			return
 		}
-		logger.Printf("could not find todo: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		logger.Printf("could not find task: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
@@ -98,64 +105,71 @@ func (s *API) UpdateTodo(c *gin.Context) {
 	// In order to set zero values (e.g. completed/archived as false) input needs to be a map not a struct
 	var input map[string]interface{}
 	if err := c.ShouldBind(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	if err := s.db.Model(&todo).Update(input).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+	if err := s.db.Model(&task).Update(input).Error; err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, UpdateTaskResponse{Success: true})
 }
 
-// DeleteTodo removes the todo from the database.
-// TODO: ensure that the todo belongs to the user!
-func (s *API) DeleteTodo(c *gin.Context) {
-	var todo Todo
-	if err := s.db.Where("id = ?", c.Param("id")).First(&todo).Error; err != nil {
+// DeleteTask removes the task from the database.
+// TODO: ensure that the task belongs to the user!
+func (s *API) DeleteTask(c *gin.Context) {
+	var task Task
+	if err := s.db.Where("id = ?", c.Param("id")).First(&task).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "not found"})
+			c.JSON(http.StatusNotFound, notFound)
 			return
 		}
-		logger.Printf("could not find todo: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		logger.Printf("could not find task: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
-	if err := s.db.Delete(&todo).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+	if err := s.db.Delete(&task).Error; err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, DeleteTaskResponse{Success: true})
 }
 
 //===========================================================================
 // Viewset for List objects
 //===========================================================================
 
-// FindLists returns all lists that belong to the user.
+// ListChecklists returns all checklists that belong to the authenticated user.
 // TODO: add pagination
-func (s *API) FindLists(c *gin.Context) {
-	user := c.Value(ctxUserKey).(User)
-	var lists []List
-	if err := s.db.Where("user_id = ?", user.ID).Find(&lists).Error; err != nil {
-		logger.Printf("could not fetch lists: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+func (s *API) ListChecklists(c *gin.Context) {
+	var req ListChecklistsRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"lists": lists})
+	var lists []Checklist
+	user := c.Value(ctxUserKey).(User)
+
+	if err := s.db.Where("user_id = ?", user.ID).Find(&lists).Error; err != nil {
+		logger.Printf("could not fetch checklists: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, ListChecklistsResponse{Success: true, Checklists: lists})
 }
 
-// CreateList creates a new grouping of todos for the user.
-func (s *API) CreateList(c *gin.Context) {
+// CreateChecklist creates a new grouping of tasks for the user.
+func (s *API) CreateChecklist(c *gin.Context) {
 	// Parse the user input
-	list := List{}
+	list := Checklist{}
 	if err := c.ShouldBind(&list); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
@@ -163,45 +177,45 @@ func (s *API) CreateList(c *gin.Context) {
 	user := c.Value(ctxUserKey).(User)
 	list.UserID = user.ID
 
-	// Create the list in the database
+	// Create the checklist in the database
 	if err := s.db.Create(&list).Error; err != nil {
 		logger.Printf("could not create list: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"success": true, "list": list.ID})
+	c.JSON(http.StatusCreated, CreateChecklistResponse{Success: true, ChecklistID: list.ID})
 }
 
-// DetailList gives as many details about the todo list as possible.
+// DetailChecklist gives as many details about the checklist as possible.
 // TODO: ensure that the list belongs to the user!
-func (s *API) DetailList(c *gin.Context) {
-	var list List
+func (s *API) DetailChecklist(c *gin.Context) {
+	var list Checklist
 	if err := s.db.Where("id = ?", c.Param("id")).First(&list).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "not found"})
+			c.JSON(http.StatusNotFound, notFound)
 			return
 		}
 		logger.Printf("could not find list: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "list": list})
+	c.JSON(http.StatusOK, DetailChecklistResponse{Success: true, Checklist: list})
 }
 
-// UpdateList modifies the database list.
+// UpdateChecklist modifies the database checklist.
 // TODO: ensure that the list belongs to the user!
-func (s *API) UpdateList(c *gin.Context) {
+func (s *API) UpdateChecklist(c *gin.Context) {
 	// Fetch the list to update
-	list := List{}
+	list := Checklist{}
 	if err := s.db.Where("id = ?", c.Param("id")).First(&list).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "not found"})
+			c.JSON(http.StatusNotFound, notFound)
 			return
 		}
-		logger.Printf("could not find list: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		logger.Printf("could not find checklist: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
@@ -209,36 +223,36 @@ func (s *API) UpdateList(c *gin.Context) {
 	// In order to set zero values, input needs to be a map, not a struct
 	var input map[string]interface{}
 	if err := c.ShouldBind(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
 	if err := s.db.Model(&list).Update(input).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, UpdateChecklistResponse{Success: true})
 }
 
-// DeleteList removes the list from the database and all associated todos.
+// DeleteChecklist removes the checklist from the database and all associated tasks.
 // TODO: ensure the list belongs to the user!
-func (s *API) DeleteList(c *gin.Context) {
-	var list List
+func (s *API) DeleteChecklist(c *gin.Context) {
+	var list Checklist
 	if err := s.db.Where("id = ?", c.Param("id")).First(&list).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "not found"})
+			c.JSON(http.StatusNotFound, notFound)
 			return
 		}
-		logger.Printf("could not find list: %s", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+		logger.Printf("could not find checklist: %s", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse(nil))
 		return
 	}
 
 	if err := s.db.Delete(&list).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, ErrorResponse(err))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, DeleteChecklistResponse{Success: true})
 }
