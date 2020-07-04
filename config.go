@@ -33,7 +33,7 @@ type Settings struct {
 	Mode         string `default:"debug"`
 	UseTLS       bool   `default:"false"`
 	Bind         string `default:"127.0.0.1"`
-	Port         int    `default:"8080" required:"true"`
+	Port         int    `envconfig:"PORT" default:"8080" required:"true"`
 	Domain       string `default:"localhost"`
 	SecretKey    string `envconfig:"SECRET_KEY" required:"true"`
 	DatabaseURL  string `envconfig:"DATABASE_URL" required:"true"`
