@@ -2,6 +2,7 @@ package todos
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kelseyhightower/envconfig"
@@ -25,14 +26,19 @@ func Config() (conf Settings, err error) {
 
 // Settings of the Todo API server. This is a fairly simple data structure that allows
 // loading the configuration from the environment. See the Config() function for more.
+// The settings also allow the server to create a mock database, which isn't something
+// that I'm particularly fond of, but it's late and I'm not sure how to mock the
+// internal database without a big mess of spaghetti.
 type Settings struct {
-	Mode        string `default:"debug"`
-	UseTLS      bool   `default:"false"`
-	Bind        string `default:"127.0.0.1"`
-	Port        int    `default:"8080" required:"true"`
-	Domain      string `default:"localhost"`
-	DatabaseURL string `envconfig:"DATABASE_URL" required:"true"`
-	SecretKey   string `envconfig:"SECRET_KEY" required:"true"`
+	Mode         string `default:"debug"`
+	UseTLS       bool   `default:"false"`
+	Bind         string `default:"127.0.0.1"`
+	Port         int    `envconfig:"PORT" default:"8080" required:"true"`
+	Domain       string `default:"localhost"`
+	SecretKey    string `envconfig:"SECRET_KEY" required:"true"`
+	DatabaseURL  string `envconfig:"DATABASE_URL" required:"true"`
+	SentryDSN    string `envconfig:"SENTRY_DSN"`
+	TokenCleanup bool   `default:"true" split_words:"true"`
 }
 
 // Addr returns the IPADDR:PORT to listen on
@@ -53,4 +59,33 @@ func (s Settings) Endpoint() string {
 		return fmt.Sprintf("http://%s/", s.Domain)
 	}
 	return fmt.Sprintf("http://%s:%d/", s.Domain, s.Port)
+}
+
+// DBDialect infers the dialect from the DatabaseURL
+func (s Settings) DBDialect() (string, error) {
+	if strings.HasPrefix(s.DatabaseURL, "postgres") {
+		return "postgres", nil
+	}
+
+	if strings.HasPrefix(s.DatabaseURL, "file") {
+		return "sqlite3", nil
+	}
+
+	return "", fmt.Errorf("unknown database dialect from %q", s.DatabaseURL)
+}
+
+// Environment returns "production" if gin mode is release, otherwise develop or
+// testing environments respectively. In the future we can configure this directly
+// from the settings if we want "staging" or other environments.
+func (s Settings) Environment() string {
+	switch s.Mode {
+	case gin.ReleaseMode:
+		return "production"
+	case gin.DebugMode:
+		return "development"
+	case gin.TestMode:
+		return "testing"
+	default:
+		return ""
+	}
 }

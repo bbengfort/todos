@@ -16,3 +16,6 @@
 
 # Local configuration
 .env
+
+# Coverage
+coverage.txt

@@ -11,15 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 
 	// Load database dialects for use with gorm
 	_ "github.com/jinzhu/gorm/dialects/postgres"
+	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
-
-// Version of the TODOs application
-const Version = "1.1"
 
 var logger = log.New(os.Stderr, "[todos] ", log.LstdFlags)
 
@@ -42,6 +42,11 @@ func New(conf Settings) (api *API, err error) {
 		conf:    conf,
 		healthy: false,
 		done:    make(chan bool),
+	}
+
+	// Connect to sentry
+	if err = api.setupSentry(); err != nil {
+		return nil, err
 	}
 
 	// Connect to the database
@@ -71,8 +76,13 @@ func New(conf Settings) (api *API, err error) {
 
 // Serve the Todos API with the internal http server and specified routes.
 func (s *API) Serve() (err error) {
-	s.setHealth(true)
+	s.SetHealth(true)
 	s.osSignals()
+
+	// Run services
+	if s.conf.TokenCleanup {
+		go s.TokensCleanupService()
+	}
 
 	logger.Printf("todo server listening on %s", s.conf.Endpoint())
 	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -85,16 +95,10 @@ func (s *API) Serve() (err error) {
 	return nil
 }
 
-// Routes returns the API router and is primarily exposed for testing purposes.
-func (s *API) Routes(healthy bool) http.Handler {
-	s.setHealth(healthy)
-	return s.router
-}
-
 // Shutdown the API server gracefully
 func (s *API) Shutdown() (err error) {
 	logger.Printf("gracefully shutting down todo server")
-	s.setHealth(false)
+	s.SetHealth(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -114,48 +118,92 @@ func (s *API) Shutdown() (err error) {
 	return nil
 }
 
+// SetHealth sets the health status on the API server, putting it into maintenance mode
+// if health is false, and removing maintenance mode if health is true. Here primarily
+// for testing purposes since it is unlikely an outside caller can access this.
+func (s *API) SetHealth(health bool) {
+	s.Lock()
+	s.healthy = health
+	s.Unlock()
+}
+
+// Routes returns the API router and is primarily exposed for testing purposes.
+func (s *API) Routes() http.Handler {
+	return s.router
+}
+
+// DB returns the gorm database and is primarily exposed for testing purposes.
+func (s *API) DB() *gorm.DB {
+	return s.db
+}
+
 func (s *API) setupRoutes() (err error) {
-	// Middleware
+	// Sentry monitoring
+	if s.conf.SentryDSN != "" {
+		s.router.Use(sentrygin.New(sentrygin.Options{Repanic: true, WaitForDelivery: false}))
+	}
+
+	// Application Middleware
 	s.router.Use(s.Available())
 	authorize := s.Authorize()
 	administrative := s.Administrative()
 
-	// Heartbeat route
-	s.router.GET("/status", s.Status)
+	// Redirect the root to the current version root
+	s.router.GET("/", s.RedirectVersion)
 
-	// Authentication and user management routes
-	s.router.POST("/login", s.Login)
-	s.router.POST("/logout", s.Logout)
-	s.router.POST("/refresh", s.Refresh)
-	s.router.POST("/register", authorize, administrative, s.Register)
-
-	// Application routes
-	s.router.GET("/", authorize, s.Overview)
-	todos := s.router.Group("/todos", authorize)
+	// V1 API
+	v1 := s.router.Group(VersionURL())
 	{
-		todos.GET("", s.FindTodos)
-		todos.POST("", s.CreateTodo)
-		todos.GET("/:id", s.DetailTodo)
-		todos.PUT("/:id", s.UpdateTodo)
-		todos.DELETE("/:id", s.DeleteTodo)
+		// Heartbeat route
+		v1.GET("/status", s.Status)
+
+		// Authentication and user management routes
+		v1.POST("/login", s.Login)
+		v1.POST("/logout", s.Logout)
+		v1.POST("/refresh", s.Refresh)
+		v1.POST("/register", authorize, administrative, s.Register)
+
+		// Application routes
+		v1.GET("/", authorize, s.Overview)
+		tasks := v1.Group("/tasks", authorize)
+		{
+			tasks.GET("", s.ListTasks)
+			tasks.POST("", s.CreateTask)
+			tasks.GET("/:id", s.DetailTask)
+			tasks.PUT("/:id", s.UpdateTask)
+			tasks.DELETE("/:id", s.DeleteTask)
+		}
+
+		lists := v1.Group("/lists", authorize)
+		{
+			lists.GET("", s.ListChecklists)
+			lists.POST("", s.CreateChecklist)
+			lists.GET("/:id", s.DetailChecklist)
+			lists.PUT("/:id", s.UpdateChecklist)
+			lists.DELETE("/:id", s.DeleteChecklist)
+		}
 	}
 
-	lists := s.router.Group("/lists", authorize)
-	{
-		lists.GET("", s.FindLists)
-		lists.POST("", s.CreateList)
-		lists.GET("/:id", s.DetailList)
-		lists.PUT("/:id", s.UpdateList)
-		lists.DELETE("/:id", s.DeleteList)
-	}
+	// NotFound and NotAllowed requests
+	s.router.NoRoute(NotFound)
+	s.router.NoMethod(NotAllowed)
 
 	return nil
 }
 
 func (s *API) setupDatabase() (err error) {
-	// TODO: support dialects other than postgres?
-	if s.db, err = gorm.Open("postgres", s.conf.DatabaseURL); err != nil {
+	var dialect string
+	if dialect, err = s.conf.DBDialect(); err != nil {
 		return err
+	}
+
+	if s.db, err = gorm.Open(dialect, s.conf.DatabaseURL); err != nil {
+		return err
+	}
+
+	// Disable logger unless we're in debug mode
+	if s.conf.Mode != gin.DebugMode {
+		s.db.LogMode(false)
 	}
 
 	// Migrate the database to the latest schema
@@ -166,10 +214,27 @@ func (s *API) setupDatabase() (err error) {
 	return nil
 }
 
-func (s *API) setHealth(health bool) {
-	s.Lock()
-	s.healthy = health
-	s.Unlock()
+func (s *API) setupSentry() (err error) {
+	if s.conf.SentryDSN == "" {
+		// If there is no sentry dsn then do not initialize sentry
+		return nil
+	}
+
+	// Create sentry options
+	opts := sentry.ClientOptions{
+		Dsn:         s.conf.SentryDSN,
+		Debug:       s.conf.Mode == gin.DebugMode,
+		Release:     Version(),
+		ServerName:  s.conf.Domain,
+		Environment: s.conf.Environment(),
+	}
+
+	// Initialize sentry
+	if err = sentry.Init(opts); err != nil {
+		return fmt.Errorf("could not initialize sentry: %s", err)
+	}
+
+	return nil
 }
 
 func (s *API) osSignals() {

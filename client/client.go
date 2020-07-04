@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/bbengfort/todos"
 )
 
 // New creates a new todos API client and prepares the credentials and configuration.
@@ -66,23 +68,24 @@ func (c *Client) NewRequest(method, url string, auth bool, data interface{}) (re
 }
 
 // Do the http request and parse the JSON response returning the data and code.
-func (c *Client) Do(req *http.Request) (map[string]interface{}, int, error) {
+func (c *Client) Do(req *http.Request, data interface{}) (status int, err error) {
 	rep, err := c.Client.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	defer rep.Body.Close()
 
 	if ct := rep.Header.Get("Content-Type"); ct != "application/json; charset=utf-8" {
-		return nil, rep.StatusCode, fmt.Errorf("unexpected content type: %s", ct)
+		return rep.StatusCode, fmt.Errorf("unexpected content type: %s", ct)
 	}
 
-	data := make(map[string]interface{})
-	if err = json.NewDecoder(rep.Body).Decode(&data); err != nil {
-		return nil, rep.StatusCode, err
+	if data != nil {
+		if err = json.NewDecoder(rep.Body).Decode(data); err != nil {
+			return rep.StatusCode, err
+		}
 	}
 
-	return data, rep.StatusCode, err
+	return rep.StatusCode, err
 }
 
 //===========================================================================
@@ -90,41 +93,41 @@ func (c *Client) Do(req *http.Request) (map[string]interface{}, int, error) {
 //===========================================================================
 
 // Status returns the current status of the todo API server.
-func (c *Client) Status() (data map[string]interface{}, err error) {
+func (c *Client) Status() (rep *todos.StatusResponse, err error) {
 	var req *http.Request
 	if req, err = c.NewRequest(http.MethodGet, "/status", false, nil); err != nil {
 		return nil, err
 	}
 
 	var status int
-	if data, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, &rep); err != nil {
 		return nil, err
 	}
 
-	// Add status code if a non 200 status is returned
-	if status != http.StatusOK {
-		data["status_code"] = http.StatusText(status)
+	// Handle the error if we don't get an ok or a success message
+	if status != http.StatusOK || rep.Status != "ok" {
+		return nil, StatusError(status, rep.Error)
 	}
 
-	return data, nil
+	return rep, nil
 }
 
 // Overview returns the user's current todo listing and m ust be authenticated.
-func (c *Client) Overview() (data map[string]interface{}, err error) {
+func (c *Client) Overview() (rep *todos.OverviewResponse, err error) {
 	var req *http.Request
 	if req, err = c.NewRequest(http.MethodGet, "/", true, nil); err != nil {
 		return nil, err
 	}
 
 	var status int
-	if data, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, &rep); err != nil {
 		return nil, err
 	}
 
-	// Add status code if a non 200 status is returned
-	if status != http.StatusOK {
-		data["status_code"] = http.StatusText(status)
+	// Handle the error if we don't get an ok or a success message
+	if status != http.StatusOK || !rep.Success {
+		return nil, StatusError(status, rep.Error)
 	}
 
-	return data, nil
+	return rep, nil
 }

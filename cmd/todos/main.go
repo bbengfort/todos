@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bbengfort/todos"
@@ -24,7 +25,7 @@ func main() {
 	// Instantiate the CLI application
 	app := cli.NewApp()
 	app.Name = "todos"
-	app.Version = todos.Version
+	app.Version = todos.Version()
 	app.Usage = "a simple todos server and CLI for personal task tracking"
 
 	app.Commands = []cli.Command{
@@ -69,6 +70,23 @@ func main() {
 				cli.BoolFlag{
 					Name:  "g, generate",
 					Usage: "generate password instead of prompting",
+				},
+				cli.StringFlag{
+					Name:   "d, db",
+					Usage:  "database connection uri",
+					EnvVar: "DATABASE_URL",
+				},
+			},
+		},
+		{
+			Name:     "cleanup",
+			Usage:    "run database cleanup commands",
+			Action:   cleanup,
+			Category: "server",
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "t, no-tokens",
+					Usage: "do not clean up access tokens",
 				},
 				cli.StringFlag{
 					Name:   "d, db",
@@ -139,18 +157,18 @@ func main() {
 			Flags:    []cli.Flag{},
 		},
 		{
-			Name:     "todo:find",
-			Usage:    "list the todos stored in the server",
+			Name:     "task:list",
+			Usage:    "list the tasks stored in the server",
 			Before:   setupClientWithLogin,
-			Action:   todoFind,
+			Action:   listTasks,
 			Category: "tasks",
 			Flags:    []cli.Flag{},
 		},
 		{
-			Name:     "todo:create",
-			Usage:    "create a todo from the specified arguments",
+			Name:     "task:create",
+			Usage:    "create a task with the specified arguments",
 			Before:   setupClientWithLogin,
-			Action:   todoCreate,
+			Action:   createTask,
 			Category: "tasks",
 			Flags: []cli.Flag{
 				cli.StringFlag{
@@ -172,10 +190,10 @@ func main() {
 			},
 		},
 		{
-			Name:     "todo:detail",
-			Usage:    "print the specifics for a given todo",
+			Name:     "task:detail",
+			Usage:    "print the specifics for a given task",
 			Before:   setupClientWithLogin,
-			Action:   todoDetail,
+			Action:   detailTask,
 			Category: "tasks",
 			Flags: []cli.Flag{
 				cli.UintFlag{
@@ -185,10 +203,10 @@ func main() {
 			},
 		},
 		{
-			Name:     "todo:update",
-			Usage:    "update a todo with new information",
+			Name:     "task:update",
+			Usage:    "update a task with new information",
 			Before:   setupClientWithLogin,
-			Action:   todoUpdate,
+			Action:   updateTask,
 			Category: "tasks",
 			Flags: []cli.Flag{
 				cli.UintFlag{
@@ -222,10 +240,10 @@ func main() {
 			},
 		},
 		{
-			Name:     "todo:delete",
-			Usage:    "delete a todo from the database",
+			Name:     "task:delete",
+			Usage:    "delete a task from the database",
 			Before:   setupClientWithLogin,
-			Action:   todoDelete,
+			Action:   deleteTask,
 			Category: "tasks",
 			Flags: []cli.Flag{
 				cli.UintFlag{
@@ -235,18 +253,18 @@ func main() {
 			},
 		},
 		{
-			Name:     "list:find",
-			Usage:    "list the todo lists stored in the server",
+			Name:     "list:list",
+			Usage:    "list the checklists stored in the server",
 			Before:   setupClientWithLogin,
-			Action:   listFind,
+			Action:   listChecklists,
 			Category: "lists",
 			Flags:    []cli.Flag{},
 		},
 		{
 			Name:     "list:create",
-			Usage:    "create a list from the specified arguments",
+			Usage:    "create a checklist from the specified arguments",
 			Before:   setupClientWithLogin,
-			Action:   listCreate,
+			Action:   createChecklist,
 			Category: "lists",
 			Flags: []cli.Flag{
 				cli.StringFlag{
@@ -265,9 +283,9 @@ func main() {
 		},
 		{
 			Name:     "list:detail",
-			Usage:    "print the specifics for a given list",
+			Usage:    "print the specifics for a given checklist",
 			Before:   setupClientWithLogin,
-			Action:   listDetail,
+			Action:   detailChecklist,
 			Category: "lists",
 			Flags: []cli.Flag{
 				cli.UintFlag{
@@ -278,9 +296,9 @@ func main() {
 		},
 		{
 			Name:     "list:update",
-			Usage:    "update a list with new information",
+			Usage:    "update a checklist with new information",
 			Before:   setupClientWithLogin,
-			Action:   listUpdate,
+			Action:   updateChecklist,
 			Category: "lists",
 			Flags: []cli.Flag{
 				cli.UintFlag{
@@ -303,9 +321,9 @@ func main() {
 		},
 		{
 			Name:     "list:delete",
-			Usage:    "delete a list from the database",
+			Usage:    "delete a checklist from the database",
 			Before:   setupClientWithLogin,
-			Action:   listDelete,
+			Action:   deleteChecklist,
 			Category: "lists",
 			Flags: []cli.Flag{
 				cli.UintFlag{
@@ -373,6 +391,7 @@ func createSuperUser(c *cli.Context) (err error) {
 	} else {
 		return cli.NewExitError("specify $DATABASE_URL to create the admin user", 1)
 	}
+	defer db.Close()
 
 	username := c.String("username")
 	email := c.String("email")
@@ -426,6 +445,28 @@ func createSuperUser(c *cli.Context) (err error) {
 	return nil
 }
 
+func cleanup(c *cli.Context) (err error) {
+	var db *gorm.DB
+	if dburl := c.String("db"); dburl != "" {
+		if db, err = gorm.Open("postgres", dburl); err != nil {
+			return cli.NewExitError(err, 1)
+		}
+	} else {
+		return cli.NewExitError("specify $DATABASE_URL to create the admin user", 1)
+	}
+	defer db.Close()
+
+	if !c.Bool("no-tokens") {
+		var rows int
+		if rows, err = todos.TokensCleanup(db); err != nil {
+			return cli.NewExitError(fmt.Errorf("could not clean up tokens: %s", err), 1)
+		}
+		fmt.Printf("- cleaned up %d tokens\n", rows)
+	}
+
+	return nil
+}
+
 //===========================================================================
 // Client Commands
 //===========================================================================
@@ -464,6 +505,15 @@ func configure(c *cli.Context) (err error) {
 	creds := client.Credentials{}
 	creds.Load()
 
+	if vs := c.String("version"); vs != "" {
+		creds.Version = vs
+	} else {
+		if creds.Version == "" {
+			creds.Version = strings.Trim(todos.VersionURL(), "/")
+		}
+		creds.Version = client.Prompt("version", creds.Version)
+	}
+
 	if ep := c.String("endpoint"); ep != "" {
 		creds.Endpoint = ep
 	} else {
@@ -491,7 +541,7 @@ func configure(c *cli.Context) (err error) {
 }
 
 func status(c *cli.Context) (err error) {
-	var data map[string]interface{}
+	var data *todos.StatusResponse
 	if data, err = todoc.Status(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
@@ -522,7 +572,7 @@ func logout(c *cli.Context) (err error) {
 }
 
 func overview(c *cli.Context) (err error) {
-	var data map[string]interface{}
+	var data *todos.OverviewResponse
 	if data, err = todoc.Overview(); err != nil {
 		return cli.NewExitError(err, 1)
 	}
@@ -536,138 +586,164 @@ func overview(c *cli.Context) (err error) {
 	return nil
 }
 
-// TODO: everything from here below just implements the rest client, make better
+func listTasks(c *cli.Context) (err error) {
+	// TODO: add user input for filters and pagination
+	req := &todos.ListTasksRequest{}
 
-func todoFind(c *cli.Context) (err error) {
-	var data map[string]interface{}
-	if data, err = todoc.FindTodos(); err != nil {
+	var data *todos.ListTasksResponse
+	if data, err = todoc.ListTasks(req); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
-	todos, ok := data["todos"]
-	if !ok {
-		return cli.NewExitError("could not get todos from response", 1)
-	}
-
-	todoList, ok := todos.([]interface{})
-	if !ok {
-		return cli.NewExitError("could not parse todos list from response", 1)
-	}
-
-	for _, item := range todoList {
-		itemInfo := item.(map[string]interface{})
-		if itemInfo["archived"].(bool) {
+	for _, item := range data.Tasks {
+		if item.Archived {
 			continue
 		}
-		if itemInfo["completed"].(bool) {
-			fmt.Printf("☑ %0.0f: %s\n", itemInfo["id"].(float64), itemInfo["title"].(string))
+
+		if item.Completed {
+			fmt.Printf("☑ %d: %s\n", item.ID, item.Title)
 		} else {
-			fmt.Printf("☐ %0.0f: %s\n", itemInfo["id"].(float64), itemInfo["title"].(string))
+			fmt.Printf("☐ %d: %s\n", item.ID, item.Title)
 		}
 	}
 
 	return nil
 }
 
-func todoCreate(c *cli.Context) (err error) {
-	var deadline time.Time
-	if d := c.Duration("deadline"); d > 0 {
-		deadline = time.Now().Add(d)
+func createTask(c *cli.Context) (err error) {
+	task := &todos.Task{
+		Title:   c.String("title"),
+		Details: c.String("details"),
 	}
 
-	if err = todoc.CreateTodo(c.String("title"), c.String("details"), c.Uint("list"), deadline); err != nil {
+	if i := c.Uint("list"); i > 0 {
+		task.ChecklistID = &i
+	}
+
+	if d := c.Duration("deadline"); d > 0 {
+		deadline := time.Now().Add(d)
+		task.Deadline = &deadline
+	}
+
+	var rep *todos.CreateTaskResponse
+	if rep, err = todoc.CreateTask(task); err != nil {
 		return cli.NewExitError(err, 1)
 	}
+
+	fmt.Printf("created task %d\n", rep.TaskID)
 	return nil
 }
 
-func todoDetail(c *cli.Context) (err error) {
-	var data map[string]interface{}
-	if data, err = todoc.DetailTodo(c.Uint("id")); err != nil {
+func detailTask(c *cli.Context) (err error) {
+	var data *todos.DetailTaskResponse
+	if data, err = todoc.DetailTask(c.Uint("id")); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
 	var out []byte
-	if out, err = yaml.Marshal(data); err != nil {
+	if out, err = yaml.Marshal(data.Task); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 	fmt.Print(string(out))
 	return nil
 }
 
-func todoUpdate(c *cli.Context) (err error) {
-	var deadline time.Time
+func updateTask(c *cli.Context) (err error) {
+	task := &todos.Task{
+		Title:   c.String("title"),
+		Details: c.String("details"),
+	}
+
+	if i := c.Uint("list"); i > 0 {
+		task.ChecklistID = &i
+	}
+
 	if d := c.Duration("deadline"); d > 0 {
-		deadline = time.Now().Add(d)
+		deadline := time.Now().Add(d)
+		task.Deadline = &deadline
 	}
 
-	if err = todoc.UpdateTodo(c.Uint("id"), c.String("title"), c.String("details"), c.Uint("list"), c.Bool("completed"), c.Bool("archived"), deadline); err != nil {
+	if _, err = todoc.UpdateTask(c.Uint("id"), task); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 	return nil
 }
 
-func todoDelete(c *cli.Context) (err error) {
-	if err = todoc.DeleteTodo(c.Uint("id")); err != nil {
+func deleteTask(c *cli.Context) (err error) {
+	if _, err = todoc.DeleteTask(c.Uint("id")); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 	return nil
 }
 
-func listFind(c *cli.Context) (err error) {
-	var data map[string]interface{}
-	if data, err = todoc.FindLists(); err != nil {
+func listChecklists(c *cli.Context) (err error) {
+	in := &todos.ListChecklistsRequest{}
+
+	var out *todos.ListChecklistsResponse
+	if out, err = todoc.ListChecklists(in); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
-	var out []byte
-	if out, err = yaml.Marshal(data); err != nil {
-		return cli.NewExitError(err, 1)
+	for _, item := range out.Checklists {
+		fmt.Printf("%d: %s\n", item.ID, item.Title)
 	}
-	fmt.Print(string(out))
+
 	return nil
 }
 
-func listCreate(c *cli.Context) (err error) {
-	var deadline time.Time
+func createChecklist(c *cli.Context) (err error) {
+	checklist := &todos.Checklist{
+		Title:   c.String("title"),
+		Details: c.String("details"),
+	}
+
 	if d := c.Duration("deadline"); d > 0 {
-		deadline = time.Now().Add(d)
+		deadline := time.Now().Add(d)
+		checklist.Deadline = &deadline
 	}
 
-	if err = todoc.CreateList(c.String("title"), c.String("details"), deadline); err != nil {
+	var rep *todos.CreateChecklistResponse
+	if rep, err = todoc.CreateChecklist(checklist); err != nil {
 		return cli.NewExitError(err, 1)
 	}
+
+	fmt.Printf("created checklist %d\n", rep.ChecklistID)
 	return nil
 }
 
-func listDetail(c *cli.Context) (err error) {
-	var data map[string]interface{}
-	if data, err = todoc.DetailList(c.Uint("id")); err != nil {
+func detailChecklist(c *cli.Context) (err error) {
+	var out *todos.DetailChecklistResponse
+	if out, err = todoc.DetailChecklist(c.Uint("id")); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 
-	var out []byte
-	if out, err = yaml.Marshal(data); err != nil {
+	var data []byte
+	if data, err = yaml.Marshal(out); err != nil {
 		return cli.NewExitError(err, 1)
 	}
-	fmt.Print(string(out))
+	fmt.Print(string(data))
 	return nil
 }
 
-func listUpdate(c *cli.Context) (err error) {
-	var deadline time.Time
+func updateChecklist(c *cli.Context) (err error) {
+	list := &todos.Checklist{
+		Title:   c.String("title"),
+		Details: c.String("details"),
+	}
+
 	if d := c.Duration("deadline"); d > 0 {
-		deadline = time.Now().Add(d)
+		deadline := time.Now().Add(d)
+		list.Deadline = &deadline
 	}
 
-	if err = todoc.UpdateList(c.Uint("id"), c.String("title"), c.String("details"), deadline); err != nil {
+	if _, err = todoc.UpdateChecklist(c.Uint("id"), list); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 	return nil
 }
 
-func listDelete(c *cli.Context) (err error) {
-	if err = todoc.DeleteList(c.Uint("id")); err != nil {
+func deleteChecklist(c *cli.Context) (err error) {
+	if _, err = todoc.DeleteChecklist(c.Uint("id")); err != nil {
 		return cli.NewExitError(err, 1)
 	}
 	return nil

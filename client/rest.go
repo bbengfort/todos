@@ -1,273 +1,228 @@
 package client
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
-	"time"
+
+	"github.com/bbengfort/todos"
 )
 
-// TODO: replace this entire file with something better!
-
-func (c *Client) FindTodos() (data map[string]interface{}, err error) {
+// ListTasks returns all tasks for the authenticated user, sorted and filtered by the
+// input request. This function checks the response for errors but does not otherwise
+// modify the output response. User authentication is required.
+func (c *Client) ListTasks(in *todos.ListTasksRequest) (out *todos.ListTasksResponse, err error) {
 	var req *http.Request
-	if req, err = c.NewRequest(http.MethodGet, "/todos", true, nil); err != nil {
+	if req, err = c.NewRequest(http.MethodGet, "/tasks", true, in); err != nil {
 		return nil, err
 	}
 
 	var status int
-	if data, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, &out); err != nil {
 		return nil, err
 	}
 
-	if status != http.StatusOK {
-		if errmsg, ok := data["error"]; ok {
-			return nil, errors.New(errmsg.(string))
-		}
-		return nil, fmt.Errorf("could not fetch todos: %s", http.StatusText(status))
+	if status != http.StatusOK || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
 
-	return data, nil
+	return out, nil
 }
 
-func (c *Client) CreateTodo(title, details string, listID uint, deadline time.Time) (err error) {
-	data := make(map[string]interface{})
-	data["title"] = title
-	data["details"] = details
-
-	if listID > 0 {
-		data["list"] = listID
-	}
-
-	if !deadline.IsZero() {
-		data["deadline"] = deadline
-	}
-
+// CreateTask posts the task to the server in order to create it. This function checks
+// the response for errors, but does not otherwise modify the output response. User
+// authentication is required.
+func (c *Client) CreateTask(in *todos.Task) (out *todos.CreateTaskResponse, err error) {
 	var req *http.Request
-	if req, err = c.NewRequest(http.MethodPost, "/todos", true, data); err != nil {
-		return err
+	if req, err = c.NewRequest(http.MethodPost, "/tasks", true, in); err != nil {
+		return nil, err
 	}
 
 	var status int
-	var info map[string]interface{}
-	if info, status, err = c.Do(req); err != nil {
-		return err
+	if status, err = c.Do(req, &out); err != nil {
+		return nil, err
 	}
 
-	if !(status == http.StatusOK || status == http.StatusCreated) {
-		if errmsg, ok := info["error"]; ok {
-			return errors.New(errmsg.(string))
-		}
-		return fmt.Errorf("could not create todo: %s", http.StatusText(status))
+	if !(status == http.StatusOK || status == http.StatusCreated) || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
 
-	return nil
+	return out, nil
 }
 
-func (c *Client) DetailTodo(id uint) (data map[string]interface{}, err error) {
+// DetailTask returns as much information as possible about the specified task. This
+// function checks the response for errors, but does not otherwise modify the output
+// response. User authentication is required.
+func (c *Client) DetailTask(id uint) (out *todos.DetailTaskResponse, err error) {
 	var req *http.Request
 	if req, err = c.NewRequest(http.MethodGet, fmt.Sprintf("/todos/%d", id), true, nil); err != nil {
 		return nil, err
 	}
 
 	var status int
-	if data, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, &out); err != nil {
 		return nil, err
 	}
 
-	if status != http.StatusOK {
-		if errmsg, ok := data["error"]; ok {
-			return nil, errors.New(errmsg.(string))
-		}
-		return nil, fmt.Errorf("could not fetch todo %d: %s", id, http.StatusText(status))
+	if status != http.StatusOK || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
 
-	return data, nil
+	return out, nil
 }
 
-func (c *Client) UpdateTodo(id uint, title, details string, listID uint, completed, archived bool, deadline time.Time) (err error) {
-	data := make(map[string]interface{})
-	if title != "" {
-		data["title"] = title
+// UpdateTask puts the task info to the specified id in order to update it. This
+// function checks the response for errors, but does not otherwise modify the output
+// response. User authentication is required.
+func (c *Client) UpdateTask(id uint, task *todos.Task) (out *todos.UpdateTaskResponse, err error) {
+	if id == 0 || (task.ID > 0 && id != task.ID) {
+		return nil, fmt.Errorf("cannot update with id %d and task id %d", id, task.ID)
 	}
-	if details != "" {
-		data["details"] = details
-	}
-	if listID > 0 {
-		data["list"] = listID
-	}
-	if completed {
-		data["completed"] = true
-	}
-	if archived {
-		data["archived"] = true
-	}
-	if !deadline.IsZero() {
-		data["deadline"] = deadline
-	}
+
+	// Ensure that the task ID is a zero value.
+	task.ID = 0
 
 	var req *http.Request
-	if req, err = c.NewRequest(http.MethodPut, fmt.Sprintf("/todos/%d", id), true, data); err != nil {
-		return err
-	}
-
-	var status int
-	var info map[string]interface{}
-	if info, status, err = c.Do(req); err != nil {
-		return err
-	}
-
-	if !(status == http.StatusOK || status == http.StatusNoContent) {
-		if errmsg, ok := info["error"]; ok {
-			return errors.New(errmsg.(string))
-		}
-		return fmt.Errorf("could not update todo %d: %s", id, http.StatusText(status))
-	}
-	return nil
-}
-
-func (c *Client) DeleteTodo(id uint) (err error) {
-	var req *http.Request
-	if req, err = c.NewRequest(http.MethodDelete, fmt.Sprintf("/todos/%d", id), true, nil); err != nil {
-		return err
-	}
-
-	var status int
-	var data map[string]interface{}
-	if data, status, err = c.Do(req); err != nil {
-		return err
-	}
-
-	if !(status == http.StatusOK || status == http.StatusNoContent) {
-		if errmsg, ok := data["error"]; ok {
-			return errors.New(errmsg.(string))
-		}
-		return fmt.Errorf("could not delete todo %d: %s", id, http.StatusText(status))
-	}
-	return nil
-}
-
-func (c *Client) FindLists() (data map[string]interface{}, err error) {
-	var req *http.Request
-	if req, err = c.NewRequest(http.MethodGet, "/lists", true, nil); err != nil {
+	if req, err = c.NewRequest(http.MethodPut, fmt.Sprintf("/tasks/%d", id), true, task); err != nil {
 		return nil, err
 	}
 
 	var status int
-	if data, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, &out); err != nil {
 		return nil, err
 	}
 
-	if status != http.StatusOK {
-		if errmsg, ok := data["error"]; ok {
-			return nil, errors.New(errmsg.(string))
-		}
-		return nil, fmt.Errorf("could not fetch lists: %s", http.StatusText(status))
+	if !(status == http.StatusOK || status == http.StatusNoContent) || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
-
-	return data, nil
+	return out, nil
 }
 
-func (c *Client) CreateList(title, details string, deadline time.Time) (err error) {
-	data := make(map[string]interface{})
-	data["title"] = title
-	data["details"] = details
-
-	if !deadline.IsZero() {
-		data["deadline"] = deadline
-	}
-
+// DeleteTask sends a delete request for the specified id. This function checks the
+// response for errors, but does not otherwise modify the output response. User
+// authentication is required.
+func (c *Client) DeleteTask(id uint) (out *todos.DeleteTaskResponse, err error) {
 	var req *http.Request
-	if req, err = c.NewRequest(http.MethodPost, "/lists", true, data); err != nil {
-		return err
+	if req, err = c.NewRequest(http.MethodDelete, fmt.Sprintf("/tasks/%d", id), true, nil); err != nil {
+		return nil, err
 	}
 
 	var status int
-	var info map[string]interface{}
-	if info, status, err = c.Do(req); err != nil {
-		return err
+	if status, err = c.Do(req, &out); err != nil {
+		return nil, err
 	}
 
-	if !(status == http.StatusOK || status == http.StatusCreated) {
-		if errmsg, ok := info["error"]; ok {
-			return errors.New(errmsg.(string))
-		}
-		return fmt.Errorf("could not create list: %s", http.StatusText(status))
+	if !(status == http.StatusOK || status == http.StatusNoContent) || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
-
-	return nil
+	return out, nil
 }
 
-func (c *Client) DetailList(id uint) (data map[string]interface{}, err error) {
+// ListChecklists returns all checklists for the authenticated user, sorted and filtered
+// by the input request. This function checks the response for errors but does not
+// otherwise modify the output response. User authentication is required.
+func (c *Client) ListChecklists(in *todos.ListChecklistsRequest) (out *todos.ListChecklistsResponse, err error) {
+	var req *http.Request
+	if req, err = c.NewRequest(http.MethodGet, "/lists", true, in); err != nil {
+		return nil, err
+	}
+
+	var status int
+	if status, err = c.Do(req, &out); err != nil {
+		return nil, err
+	}
+
+	if status != http.StatusOK || !out.Success {
+		return out, StatusError(status, out.Error)
+	}
+
+	return out, nil
+}
+
+// CreateChecklist posts the checklist to the server in order to create it. This function
+// checks the response for errors, but does not otherwise modify the output response.
+// User authentication is required.
+func (c *Client) CreateChecklist(in *todos.Checklist) (out *todos.CreateChecklistResponse, err error) {
+	var req *http.Request
+	if req, err = c.NewRequest(http.MethodPost, "/lists", true, in); err != nil {
+		return nil, err
+	}
+
+	var status int
+	if status, err = c.Do(req, &out); err != nil {
+		return nil, err
+	}
+
+	if !(status == http.StatusOK || status == http.StatusCreated) || !out.Success {
+		return out, StatusError(status, out.Error)
+	}
+
+	return out, nil
+}
+
+// DetailChecklist returns as much information as possible about the specified checklist.
+// This function checks the response for errors, but does not otherwise modify the
+// output response. User authentication is required.
+func (c *Client) DetailChecklist(id uint) (out *todos.DetailChecklistResponse, err error) {
 	var req *http.Request
 	if req, err = c.NewRequest(http.MethodGet, fmt.Sprintf("/lists/%d", id), true, nil); err != nil {
 		return nil, err
 	}
 
 	var status int
-	if data, status, err = c.Do(req); err != nil {
+	if status, err = c.Do(req, &out); err != nil {
 		return nil, err
 	}
 
-	if status != http.StatusOK {
-		if errmsg, ok := data["error"]; ok {
-			return nil, errors.New(errmsg.(string))
-		}
-		return nil, fmt.Errorf("could not fetch list %d: %s", id, http.StatusText(status))
+	if status != http.StatusOK || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
 
-	return data, nil
+	return out, nil
 }
 
-func (c *Client) UpdateList(id uint, title, details string, deadline time.Time) (err error) {
-	data := make(map[string]interface{})
-	if title != "" {
-		data["title"] = title
-	}
-	if details != "" {
-		data["details"] = details
-	}
-	if !deadline.IsZero() {
-		data["deadline"] = deadline
+// UpdateChecklist puts the checklist info to the specified id in order to update it.
+// This function checks the response for errors, but does not otherwise modify the
+// output response. User authentication is required.
+func (c *Client) UpdateChecklist(id uint, list *todos.Checklist) (out *todos.UpdateChecklistResponse, err error) {
+	if id == 0 || (list.ID > 0 && id != list.ID) {
+		return nil, fmt.Errorf("cannot update with id %d and checklist id %d", id, list.ID)
 	}
 
+	// Ensure that the checklist ID is a zero value.
+	list.ID = 0
+
 	var req *http.Request
-	if req, err = c.NewRequest(http.MethodPut, fmt.Sprintf("/lists/%d", id), true, data); err != nil {
-		return err
+	if req, err = c.NewRequest(http.MethodPut, fmt.Sprintf("/lists/%d", id), true, list); err != nil {
+		return nil, err
 	}
 
 	var status int
-	var info map[string]interface{}
-	if info, status, err = c.Do(req); err != nil {
-		return err
+	if status, err = c.Do(req, out); err != nil {
+		return nil, err
 	}
 
-	if !(status == http.StatusOK || status == http.StatusNoContent) {
-		if errmsg, ok := info["error"]; ok {
-			return errors.New(errmsg.(string))
-		}
-		return fmt.Errorf("could not update list %d: %s", id, http.StatusText(status))
+	if !(status == http.StatusOK || status == http.StatusNoContent) || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
-	return nil
+	return out, nil
 }
 
-func (c *Client) DeleteList(id uint) (err error) {
+// DeleteChecklist sends a delete request for the specified id. This function checks the
+// response for errors, but does not otherwise modify the output response. User
+// authentication is required.
+func (c *Client) DeleteChecklist(id uint) (out *todos.DeleteChecklistResponse, err error) {
 	var req *http.Request
 	if req, err = c.NewRequest(http.MethodDelete, fmt.Sprintf("/lists/%d", id), true, nil); err != nil {
-		return err
+		return nil, err
 	}
 
 	var status int
-	var data map[string]interface{}
-	if data, status, err = c.Do(req); err != nil {
-		return err
+	if status, err = c.Do(req, &out); err != nil {
+		return nil, err
 	}
 
-	if !(status == http.StatusOK || status == http.StatusNoContent) {
-		if errmsg, ok := data["error"]; ok {
-			return errors.New(errmsg.(string))
-		}
-		return fmt.Errorf("could not delete list %d: %s", id, http.StatusText(status))
+	if !(status == http.StatusOK || status == http.StatusNoContent) || !out.Success {
+		return out, StatusError(status, out.Error)
 	}
-	return nil
+	return out, nil
 }
