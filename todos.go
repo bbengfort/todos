@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bbengfort/todos/web"
 	"github.com/getsentry/sentry-go"
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
@@ -148,8 +149,9 @@ func (s *API) setupRoutes() (err error) {
 	authorize := s.Authorize()
 	administrative := s.Administrative()
 
-	// Redirect the root to the current version root
+	// Redirect the root to the current version root or to the web app based on Accept
 	s.router.GET("/", s.RedirectVersion)
+	s.router.StaticFS("/app", web.WebApp)
 
 	// V1 API
 	v1 := s.router.Group(VersionURL())

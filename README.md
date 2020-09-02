@@ -69,3 +69,7 @@ Other features/notes:
 
 - a new token is generated on every login, so the user can have different tokens on multiple devices.
 - a side go routine needs to run periodically to clean up expired tokens or an automatic mechanism needs to delete the token from the database when it's expired.
+
+## Icons
+
+Icons made by [Freepik](https://www.flaticon.com/authors/freepik) from [www.flaticon.com](https://www.flaticon.com/).

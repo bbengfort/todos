@@ -17,10 +17,26 @@ func TestVersion(t *testing.T) {
 }
 
 func (s *TodosTestSuite) TestRedirectVersion() {
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/", nil)
-	s.router.ServeHTTP(w, req)
+	tt := []struct {
+		header   string
+		location string
+		code     int
+	}{
+		{"", "", http.StatusNotAcceptable},
+		{"*/*", "/v1", http.StatusPermanentRedirect},
+		{"application/json", "/v1", http.StatusPermanentRedirect},
+		{"application/*", "/v1", http.StatusPermanentRedirect},
+		{"text/html", "/app", http.StatusPermanentRedirect},
+		{"text/*", "/app", http.StatusPermanentRedirect},
+	}
 
-	require.Equal(s.T(), http.StatusPermanentRedirect, w.Code)
-	require.Equal(s.T(), "/v1", w.Result().Header.Get("Location"))
+	for _, tc := range tt {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/", nil)
+		req.Header.Add("Accept", tc.header)
+		s.router.ServeHTTP(w, req)
+
+		require.Equal(s.T(), tc.code, w.Code)
+		require.Equal(s.T(), tc.location, w.Result().Header.Get("Location"))
+	}
 }
